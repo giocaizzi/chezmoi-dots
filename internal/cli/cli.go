@@ -153,7 +153,8 @@ func usage(s term.Style) string {
 	p("  %sdots lint%s                        Validate all dotfiles registries and rendered templates\n\n", m, o)
 
 	p("%sDOCUMENTATION%s\n", b, o)
-	p("  %sdocs/OS.md#editing-your-dotfiles%s %s·%s %sdocs/OS.md#packages%s\n", d, o, d, o, d, o)
+	p("  %shttps://github.com/giocaizzi/chezmoi-dots#readme%s\n", d, o)
+	p("  %shttps://github.com/giocaizzi/chezmoi-dots#commands-reference%s\n", d, o)
 
 	return sb.String()
 }

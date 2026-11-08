@@ -96,7 +96,7 @@ func TestHints(t *testing.T) {
 			{"chezmoi dots upgrade brew", "upgrade 2 brew packages"},
 			{"chezmoi dots upgrade npm", "upgrade 1 npm package"},
 			{"npm install -g typescript@5", "back to the registry pin"},
-			{"", "not installed: bun, z (the install script runs when packages.toml changes; docs/OS.md#packages)"},
+			{"", "not installed: bun, z (the install script runs when packages.toml changes)"},
 		}},
 	}
 	for _, tt := range tests {

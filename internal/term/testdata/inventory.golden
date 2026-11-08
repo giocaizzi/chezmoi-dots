@@ -36,4 +36,4 @@ next
   chezmoi apply                  install the pinned agents, shfmt
   chezmoi dots upgrade brew      upgrade 1 brew package
   npm install -g typescript@5    back to the registry pin
-  not installed: bun (the install script runs when packages.toml changes; docs/OS.md#packages)
+  not installed: bun (the install script runs when packages.toml changes)
