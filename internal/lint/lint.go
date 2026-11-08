@@ -206,13 +206,23 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 }
 
 // templateFiles lists the templates worth rendering whole: every script, the alias
-// files and the JSON settings. Partials need arguments and the secrets files read the
+// files and optional settings templates if present. Partials need arguments and the secrets files read the
 // Secrets Manager, so they are checked through the templates that use them.
 func (l Linter) templateFiles() ([]string, error) {
-	out := []string{
-		"dot_config/shell/aliases.sh.tmpl", "dot_config/shell/omz-aliases.zsh.tmpl", "dot_config/powershell/aliases.ps1.tmpl",
-		".chezmoitemplates/vscode-mcp.json", ".chezmoitemplates/claude-settings.json", ".chezmoitemplates/copilot-settings.json", ".chezmoitemplates/antigravity-settings.json",
+	var out []string
+	candidates := []string{
+		"dot_config/shell/aliases.sh.tmpl",
+		"dot_config/shell/omz-aliases.zsh.tmpl",
+		"dot_config/powershell/aliases.ps1.tmpl",
+		".chezmoitemplates/claude-settings.json",
+		".chezmoitemplates/copilot-settings.json",
+		".chezmoitemplates/antigravity-settings.json",
 		"dot_codex/modify_private_config.toml",
+	}
+	for _, c := range candidates {
+		if _, err := os.Stat(filepath.Join(l.Src, filepath.FromSlash(c))); err == nil {
+			out = append(out, c)
+		}
 	}
 	scripts, err := filepath.Glob(filepath.Join(l.Src, ".chezmoiscripts", "*.tmpl"))
 	if err != nil {
