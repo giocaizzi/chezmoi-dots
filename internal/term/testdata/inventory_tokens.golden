@@ -36,4 +36,4 @@
   <m>chezmoi apply</>            <d>install the pinned agents, shfmt</>
   <m>chezmoi dots upgrade brew</>  <d>upgrade 1 brew package</>
   <m>npm install -g typescript@5</>  <d>back to the registry pin</>
-  <d>not installed: bun (the install script runs when packages.toml changes; docs/OS.md#packages)</>
+  <d>not installed: bun (the install script runs when packages.toml changes)</>

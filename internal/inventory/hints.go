@@ -89,7 +89,7 @@ func (r Report) toolHints() []Hint {
 	}
 	if len(missing) > 0 {
 		slices.Sort(missing)
-		add("", "not installed: "+strings.Join(missing, ", ")+" (the install script runs when packages.toml changes; docs/OS.md#packages)")
+		add("", "not installed: "+strings.Join(missing, ", ")+" (the install script runs when packages.toml changes)")
 	}
 	return hs
 }
