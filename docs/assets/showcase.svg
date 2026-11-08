@@ -1,0 +1,192 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient matching Shortty (sky blue -> indigo -> lavender) -->
+    <linearGradient id="bg-grad-dots" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8ec5fc" />
+      <stop offset="50%" stop-color="#a5b4fc" />
+      <stop offset="100%" stop-color="#d8b4fe" />
+    </linearGradient>
+
+    <!-- macOS Soft Window Drop Shadow -->
+    <filter id="win-shadow-dots" x="-10%" y="-10%" width="120%" height="125%">
+      <feDropShadow dx="0" dy="24" stdDeviation="30" flood-color="#14103c" flood-opacity="0.38" />
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#14103c" flood-opacity="0.22" />
+    </filter>
+
+    <clipPath id="window-clip-dots">
+      <rect x="80" y="60" width="840" height="520" rx="16" ry="16" />
+    </clipPath>
+
+    <style>
+      .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace; font-size: 13.5px; }
+      .bold { font-weight: 600; }
+      .dim { fill: #6c7086; }
+      .text { fill: #cdd6f4; }
+      .blue { fill: #89b4fa; }
+      .mauve { fill: #cba6f7; }
+      .green { fill: #a6e3a1; }
+      .yellow { fill: #f9e2af; }
+      .peach { fill: #fab387; }
+      .red { fill: #f38ba8; }
+      .teal { fill: #94e2d5; }
+      
+      /* Scene Animations: 12s infinite loop */
+      @keyframes scene1 {
+        0%, 30% { opacity: 1; pointer-events: auto; }
+        33%, 100% { opacity: 0; pointer-events: none; }
+      }
+      @keyframes scene2 {
+        0%, 30% { opacity: 0; pointer-events: none; }
+        33%, 63% { opacity: 1; pointer-events: auto; }
+        66%, 100% { opacity: 0; pointer-events: none; }
+      }
+      @keyframes scene3 {
+        0%, 63% { opacity: 0; pointer-events: none; }
+        66%, 96% { opacity: 1; pointer-events: auto; }
+        100% { opacity: 0; pointer-events: none; }
+      }
+      @keyframes cursorBlink {
+        0%, 49% { opacity: 1; }
+        50%, 100% { opacity: 0; }
+      }
+
+      .scene-1 { animation: scene1 12s infinite; }
+      .scene-2 { animation: scene2 12s infinite; }
+      .scene-3 { animation: scene3 12s infinite; }
+      .cursor { animation: cursorBlink 0.8s infinite; }
+    </style>
+  </defs>
+
+  <!-- Canvas Padding Background -->
+  <rect width="1000" height="640" rx="24" fill="url(#bg-grad-dots)" />
+
+  <!-- Window Container with Shadow -->
+  <g filter="url(#win-shadow-dots)">
+    <!-- Window Background -->
+    <rect x="80" y="60" width="840" height="520" rx="16" fill="#1e1e2e" stroke="rgba(255,255,255,0.22)" stroke-width="1.5" />
+
+    <!-- Window Titlebar -->
+    <path d="M 80,76 A 16,16 0 0,1 96,60 L 904,60 A 16,16 0 0,1 920,76 L 920,104 L 80,104 Z" fill="#181825" />
+    <line x1="80" y1="104" x2="920" y2="104" stroke="#313244" stroke-width="1" />
+
+    <!-- Traffic Lights -->
+    <circle cx="106" cy="82" r="6" fill="#ff5f56" stroke="#e0443e" stroke-width="0.5" />
+    <circle cx="126" cy="82" r="6" fill="#ffbd2e" stroke="#dea123" stroke-width="0.5" />
+    <circle cx="146" cy="82" r="6" fill="#27c93f" stroke="#1aab29" stroke-width="0.5" />
+
+    <!-- Titlebar Path & Badge -->
+    <text x="500" y="86" text-anchor="middle" fill="#a6adc8" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="500">
+      ~ / .local / share / chezmoi — chezmoi-dots (Developer Companion Plugin)
+    </text>
+
+    <!-- Bottom Status Line Bar -->
+    <rect x="80" y="542" width="840" height="38" fill="#181825" />
+    <line x1="80" y1="542" x2="920" y2="542" stroke="#313244" stroke-width="1" />
+    <text x="100" y="566" class="mono">
+      <tspan class="dim">[</tspan><tspan class="blue"> chezmoi-dots</tspan><tspan class="dim">]</tspan>
+      <tspan class="dim"> [</tspan><tspan class="green">󰚥 up-to-date</tspan><tspan class="dim">]</tspan>
+      <tspan class="dim"> [</tspan><tspan class="mauve">󰊢 main</tspan><tspan class="dim">]</tspan>
+      <tspan class="dim"> [</tspan><tspan class="yellow">󰏖 9-matrix verified</tspan><tspan class="dim">]</tspan>
+    </text>
+    <text x="900" y="566" text-anchor="end" class="mono dim">
+      v0.1.0
+    </text>
+
+    <!-- Content Area (Clipped) -->
+    <g clip-path="url(#window-clip-dots)">
+      
+      <!-- SCENE 1: outdated -->
+      <g class="scene-1">
+        <text x="110" y="146" class="mono">
+          <tspan class="mauve">❯</tspan> <tspan class="text bold">chezmoi dots outdated</tspan>
+        </text>
+
+        <!-- Table Header -->
+        <text x="110" y="186" class="mono bold dim">
+          PACKAGE          CURRENT     PINNED      LATEST      STATUS
+        </text>
+        <line x1="110" y1="198" x2="890" y2="198" stroke="#313244" stroke-width="1" />
+
+        <!-- Table Rows -->
+        <text x="110" y="228" class="mono">
+          <tspan class="blue bold">chezmoi</tspan>          <tspan class="text">2.70.0</tspan>      <tspan class="text">2.70.0</tspan>      <tspan class="text">2.70.0</tspan>      <tspan class="green">✓ up to date</tspan>
+        </text>
+        <text x="110" y="258" class="mono">
+          <tspan class="blue bold">gitleaks</tspan>         <tspan class="text">8.24.0</tspan>      <tspan class="text">8.24.0</tspan>      <tspan class="text">8.24.0</tspan>      <tspan class="green">✓ up to date</tspan>
+        </text>
+        <text x="110" y="288" class="mono">
+          <tspan class="peach bold">actionlint</tspan>       <tspan class="text">1.7.7</tspan>       <tspan class="text">1.7.7</tspan>       <tspan class="yellow bold">1.7.8</tspan>       <tspan class="yellow">↑ bump available</tspan>
+        </text>
+        <text x="110" y="318" class="mono">
+          <tspan class="blue bold">agents</tspan>           <tspan class="text">0.1.2</tspan>       <tspan class="text">0.1.2</tspan>       <tspan class="text">0.1.2</tspan>       <tspan class="green">✓ up to date</tspan>
+        </text>
+        <text x="110" y="348" class="mono">
+          <tspan class="blue bold">hadolint</tspan>         <tspan class="text">2.14.0</tspan>      <tspan class="text">2.14.0</tspan>      <tspan class="text">2.14.0</tspan>      <tspan class="green">✓ up to date</tspan>
+        </text>
+
+        <line x1="110" y1="368" x2="890" y2="368" stroke="#313244" stroke-width="1" />
+        <text x="110" y="400" class="mono yellow">1 package update available · Run chezmoi dots bump actionlint</text>
+
+        <text x="110" y="450" class="mono">
+          <tspan class="mauve">❯</tspan> <tspan class="cursor text">▌</tspan>
+        </text>
+      </g>
+
+      <!-- SCENE 2: lint -->
+      <g class="scene-2">
+        <text x="110" y="146" class="mono">
+          <tspan class="mauve">❯</tspan> <tspan class="text bold">chezmoi dots lint</tspan>
+        </text>
+
+        <text x="110" y="190" class="mono green">✓ registry   (edit.toml entries match source files and commands)</text>
+        <text x="110" y="226" class="mono green">✓ aliases    (cross-shell alias definitions in sync across zsh/bash/pwsh)</text>
+        <text x="110" y="262" class="mono green">✓ packages   (packages.toml release checksums and requirements)</text>
+        <text x="110" y="298" class="mono green">✓ matrix     (9 configurations seeded without drift from .chezmoi.toml.tmpl)</text>
+        <text x="110" y="334" class="mono green">✓ templates  (shellchecked and parsed across Darwin, Linux, Windows)</text>
+
+        <text x="110" y="390" class="mono text bold">
+          All 5 dotfiles verification suites passed cleanly.
+        </text>
+
+        <text x="110" y="450" class="mono">
+          <tspan class="mauve">❯</tspan> <tspan class="cursor text">▌</tspan>
+        </text>
+      </g>
+
+      <!-- SCENE 3: view matrix -->
+      <g class="scene-3">
+        <text x="110" y="146" class="mono">
+          <tspan class="mauve">❯</tspan> <tspan class="text bold">chezmoi dots view git/config.tmpl --as linux,work</tspan>
+        </text>
+
+        <text x="110" y="184" class="mono dim"># Rendered for target: OS=linux Role=work</text>
+        <text x="110" y="214" class="mono">
+          <tspan class="blue">[user]</tspan>
+        </text>
+        <text x="110" y="240" class="mono">
+          <tspan class="text">    name = Octocat</tspan>
+        </text>
+        <text x="110" y="266" class="mono">
+          <tspan class="text">    email = octocat@work.com</tspan>
+        </text>
+        <text x="110" y="296" class="mono">
+          <tspan class="blue">[includeIf "gitdir:~/personal/"]</tspan>
+        </text>
+        <text x="110" y="322" class="mono">
+          <tspan class="text">    path = ~/.config/git/personal</tspan>
+        </text>
+        <text x="110" y="352" class="mono">
+          <tspan class="blue">[commit]</tspan>
+        </text>
+        <text x="110" y="378" class="mono">
+          <tspan class="text">    gpgsign = true</tspan>
+        </text>
+
+        <text x="110" y="450" class="mono">
+          <tspan class="mauve">❯</tspan> <tspan class="cursor text">▌</tspan>
+        </text>
+      </g>
+
+    </g>
+  </g>
+</svg>
