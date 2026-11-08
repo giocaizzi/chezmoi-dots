@@ -10,7 +10,7 @@ Declarative registry-driven editing, package inventory drift detection, automate
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 <p align="center">
-  <img src="docs/assets/showcase.svg" alt="chezmoi-dots showcase: package inventory, matrix validation, live template previews" width="880">
+  <img src="docs/assets/showcase.png" alt="chezmoi-dots showcase: package inventory, matrix validation, live template previews" width="880">
 </p>
 
 </div>
