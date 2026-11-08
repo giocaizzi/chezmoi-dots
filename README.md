@@ -9,23 +9,9 @@ Declarative registry-driven editing, package inventory drift detection, automate
 [![CI](https://github.com/giocaizzi/chezmoi-dots/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/giocaizzi/chezmoi-dots/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│  🔴 🟡 🟢  chezmoi dots outdated                                       │
-├────────────────────────────────────────────────────────────────────────┤
-│                                                                        │
-│   PACKAGE        CURRENT    PINNED    LATEST    STATUS                 │
-│   chezmoi        2.70.0     2.70.0    2.70.0    ✓ up to date           │
-│   gitleaks       8.24.0     8.24.0    8.24.0    ✓ up to date           │
-│   actionlint     1.7.7      1.7.7     1.7.8     ≠ update available     │
-│   agents         0.1.0      0.1.0     0.1.0     ✓ up to date           │
-│                                                                        │
-│   1 update available · Run `chezmoi dots bump` to pin newer versions   │
-│                                                                        │
-├────────────────────────────────────────────────────────────────────────┤
-│  [ chezmoi-dots] [󰚥 up-to-date] [󰊢 main] [ ~/.local/share/chezmoi]   │
-└────────────────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/assets/showcase.svg" alt="chezmoi-dots showcase: package inventory, matrix validation, live template previews" width="880">
+</p>
 
 </div>
 

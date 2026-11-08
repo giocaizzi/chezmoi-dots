@@ -1,19 +1,37 @@
-# <repo name>
+# chezmoi-dots
 
-<One line: what this repo is for.>
+The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-dots` standalone binary and `chezmoi dots` plugin).
 
-- Commands: `make help`, `make lint`, `make test`, `make check` (= lint + test; CI job `check` runs it), `make prepush` (the local gate before marking a PR ready).
-- Docs live in [docs/](docs/); this file links to them and never duplicates them.
-- GitHub setup follows the [GitHub standard](https://github.com/giocaizzi/.github/blob/main/docs/standard.md).
-- `SECURITY.md` and issue templates are inherited from `giocaizzi/.github`; do not add copies.
+## Purpose & Architecture
 
-## Onboarding
-Checklist for a new repo; rules and tiers are in the [standard](https://github.com/giocaizzi/.github/blob/main/docs/standard.md), procedure in its [rollout runbook](https://github.com/giocaizzi/.github/blob/main/docs/runbook-rollout.md).
-- Add the repo to `standard/repos.yaml` in `giocaizzi/.github` (`type`, `released`, `pypi`, `deploys`), then `make onboard REPO=<name>` there.
-- Python: ruff `select = ["ALL"]` with Google docstrings from the start (snippet in the harness `python-development` skill and the standard).
-- Released: release-please. PyPI: trusted publishing from environment `pypi`, and register the trusted publisher on pypi.org.
-- Publish or deploy jobs: run in a GitHub environment, secrets as environment secrets.
-- README badges grow by tier (standard, README).
+`chezmoi-dots` extends chezmoi with an interactive, declarative developer toolkit for managing multi-OS, multi-role dotfiles repositories:
 
-## Gotchas
-- <Add repo-specific gotchas here.>
+- `cmd/chezmoi-dots/` — Main entrypoint (invoked as `dots` or `chezmoi-dots`).
+- `internal/edit/` — Interactive registry-driven dotfiles editor with live pane previews and pre/post save hooks.
+- `internal/matrix/` — 9-matrix OS (Darwin, Linux, Windows) × Role (Personal, Work, Light) evaluator.
+- `internal/lint/` — Comprehensive template and registry integrity validator.
+- `internal/pkgreg/` — Package and release registry validator and version comparator.
+- `internal/release/` — Remote release fetcher and automated checksum bumper (`dots bump`).
+- `internal/inventory/` — System package and tool inventory scanner across package managers.
+- `internal/audit/` — Live unmanaged shell alias detector (`dots audit aliases`).
+- `internal/aliasreg/` — Cross-shell alias registry compiler.
+- `internal/chez/` — Chezmoi client abstraction and execution wrapper.
+- `internal/term/` — Terminal styling, Catppuccin themes, and inventory tables.
+
+## Principles & Public Repository Integrity
+
+- **Strict Generality**: This is an open-source, universal tool meant for the entire developer community using chezmoi.
+- **No Personal Configurations**: Never hardcode personal usernames, private machine hostnames, internal corporate paths, or proprietary repository names in code, tests, documentation, or templates.
+- **Generic Placeholders**: Always use standard generic placeholders in examples and tests: `example/harness`, `octocat`, standard tools, and generic dotfiles repositories.
+- **Cross-Platform Parity**: Every feature must work across macOS, Linux, and Windows with test coverage for each.
+
+## Development
+
+- `make check` — Run linter and tests with race detection (`check: lint test`).
+- `make lint` — Run `golangci-lint run`.
+- `make test` — Run unit and integration tests with `go test -race -shuffle=on ./...`.
+- `make build` — Build cross-platform binaries into `bin/`.
+
+## Conventional Commits
+
+Commits must follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`). Pull requests are auto-merged using squash commits once CI checks pass.
