@@ -23,7 +23,7 @@ func richReport() inventory.Report {
 		Groups: []inventory.Group{
 			{Source: inventory.Release, Tools: []inventory.Tool{
 				{Name: "age", Installed: "1.2.1", Pinned: "1.2.1", Latest: "1.2.1"},
-				{Name: "chezmoi-agents", Installed: "0.7.0", Pinned: "0.7.1", Latest: "0.7.1"},
+				{Name: "agents", Installed: "0.7.0", Pinned: "0.7.1", Latest: "0.7.1"},
 				{Name: "gitleaks", Installed: "8.28.0", Pinned: "8.28.0", Latest: "8.30.0"},
 				{Name: "shfmt", Missing: true, Pinned: "3.12.0", Latest: "3.12.0"},
 			}},
