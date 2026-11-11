@@ -87,10 +87,11 @@ func (d Deps) releases(ctx context.Context) (string, []pkgreg.Release, error) {
 // outdated prints the overview of every tool on this machine.
 func (d Deps) outdated(ctx context.Context, args []string) error {
 	fs := newFlags("outdated")
-	offline := fs.Bool("offline", false, "")
-	fetch := fs.Bool("fetch", false, "")
-	check := fs.Bool("check", false, "")
-	if pos, err := parse(fs, args); err != nil || len(pos) > 0 {
+	pos, err := parse(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(pos) > 0 {
 		return ErrUsage
 	}
 	cz, _ := d.chezmoi()
@@ -108,10 +109,10 @@ func (d Deps) outdated(ctx context.Context, args []string) error {
 	}
 	rep := survey.Survey{
 		Runner: d.Runner, Latest: d.finder().Latest, Stat: os.Stat, LookPath: d.LookPath,
-		Home: d.Home, GOOS: d.GOOS, WorkingTree: wt, Offline: *offline, Fetch: *fetch,
+		Home: d.Home, GOOS: d.GOOS, WorkingTree: wt, Offline: boolValue(fs, "offline"), Fetch: boolValue(fs, "fetch"),
 	}.Run(ctx, sel)
 	term.NewStyle(d.Stdout, d.Getenv).Inventory(d.Stdout, rep, time.Now())
-	if *check && rep.Failing() {
+	if boolValue(fs, "check") && rep.Failing() {
 		return ErrReported
 	}
 	return nil
@@ -144,7 +145,6 @@ func (d Deps) releaseCheck(ctx context.Context) error {
 
 func (d Deps) bump(ctx context.Context, args []string) error {
 	fs := newFlags("bump")
-	dry := fs.Bool("dry-run", false, "show what would change, write nothing")
 	names, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -185,7 +185,7 @@ func (d Deps) bump(ctx context.Context, args []string) error {
 	switch {
 	case bumped == 0:
 		fmt.Fprintln(d.Stdout, "all releases are up to date")
-	case *dry:
+	case boolValue(fs, "dry-run"):
 		fmt.Fprintln(d.Stdout, "dry run: nothing written")
 	default:
 		if err := os.WriteFile(file, []byte(updated), 0o644); err != nil { //nolint:gosec // a source file like the others
@@ -198,7 +198,6 @@ func (d Deps) bump(ctx context.Context, args []string) error {
 
 func (d Deps) upgrade(ctx context.Context, args []string) error {
 	fs := newFlags("upgrade")
-	dry := fs.Bool("dry-run", false, "show the commands, run nothing")
 	only, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -211,7 +210,7 @@ func (d Deps) upgrade(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUsage, err)
 	}
-	if err := upgrade.Run(ctx, d.Runner, steps, *dry, d.Stdout, d.Stderr); err != nil {
+	if err := upgrade.Run(ctx, d.Runner, steps, boolValue(fs, "dry-run"), d.Stdout, d.Stderr); err != nil {
 		return err
 	}
 	if len(only) == 0 || slices.Contains(only, "releases") {
@@ -223,20 +222,15 @@ func (d Deps) upgrade(ctx context.Context, args []string) error {
 
 func (d Deps) live(ctx context.Context, args []string) error {
 	fs := newFlags("live")
-	bin := fs.String("bin", "chezmoi", "")
-	src := fs.String("src", "", "")
-	realSrc := fs.String("real-src", "", "")
-	file := fs.String("file", "", "")
-	edited := fs.String("edited", "", "")
-	dir := fs.String("dir", "", "")
-	var global stringList
-	fs.Var(&global, "global", "")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
-	cz := chez.New(d.Runner, *bin, append(slices.Clone(global), "--source", *src)...)
+	global, _ := fs.Lookup("global").Value.(*stringList) // registered by newFlags
+	src := stringValue(fs, "src")
+	cz := chez.New(d.Runner, stringValue(fs, "bin"), append(slices.Clone(*global), "--source", src)...)
 	l := edit.Live{
-		CZ: cz, File: *file, Edited: *edited, Shadow: *src, RealSrc: *realSrc, Dir: *dir,
+		CZ: cz, File: stringValue(fs, "file"), Edited: stringValue(fs, "edited"), Shadow: src,
+		RealSrc: stringValue(fs, "real-src"), Dir: stringValue(fs, "dir"),
 		Out: d.Stdout, Style: term.NewStyle(d.Stdout, d.Getenv), Interval: 500 * time.Millisecond,
 	}
 	return l.Loop(ctx)

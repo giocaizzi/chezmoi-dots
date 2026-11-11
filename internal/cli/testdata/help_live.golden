@@ -1,0 +1,24 @@
+chezmoi dots live — Internal live preview pane
+
+USAGE
+  chezmoi dots live [options]
+
+ARGUMENTS
+  Internal command started by the edit preview pane. No positional arguments are required; extras are ignored.
+  Default: refresh the preview every 500ms.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+  --bin <executable>  chezmoi executable (default: "chezmoi")
+  --dir <directory>  working directory (default: "")
+  --edited <file>  edited file (default: "")
+  --file <file>  source file (default: "")
+  --global <argument>  repeatable chezmoi global argument (default: "")
+  --real-src <directory>  real source directory (default: "")
+  --src <directory>  shadow source directory (default: "")
+
+ENVIRONMENT
+  None; pane configuration is passed through options.
+
+EXAMPLES
+  chezmoi dots help live

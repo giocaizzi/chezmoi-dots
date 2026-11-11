@@ -1,0 +1,24 @@
+chezmoi dots view — Preview rendered dotfiles
+
+USAGE
+  chezmoi dots view [<what>] [options]
+
+ARGUMENTS
+  what  Registry entry, source path or target path. Required unless --matrix or --all requests an overview.
+  Default: render the current configuration; --matrix/--all render all nine OS/role configurations.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+  --all  overview across all registry entries (default: "false")
+  --as <os[,role]>  render one os[,role] (darwin|linux|windows; personal|work|light) (default: "")
+  --matrix  render every configuration (default: "false")
+
+ENVIRONMENT
+  CHEZMOI_EXECUTABLE  chezmoi executable (default: chezmoi).
+  CHEZMOI_CONFIG_FILE  chezmoi config file (default: chezmoi's config).
+  CHEZMOI_SOURCE_DIR  source directory (default: ask chezmoi; honors .chezmoiroot).
+
+EXAMPLES
+  chezmoi dots view shell
+  chezmoi dots view shell --as linux,work
+  chezmoi dots view --matrix

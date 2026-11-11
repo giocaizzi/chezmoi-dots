@@ -1,0 +1,20 @@
+chezmoi dots audit — Audit live shell configuration
+
+USAGE
+  chezmoi dots audit aliases
+
+COMMANDS
+  aliases    Detect unmanaged live shell aliases
+
+ARGUMENTS
+  aliases  Required audit command; there is no default audit.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+
+ENVIRONMENT
+  See aliases help for shell configuration locations.
+
+EXAMPLES
+  chezmoi dots audit aliases
+  chezmoi dots help audit aliases

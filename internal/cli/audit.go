@@ -14,12 +14,16 @@ import (
 // audit lists the aliases live in this machine's interactive shells that the registry
 // does not account for.
 func (d Deps) audit(ctx context.Context, args []string) error {
-	pos, err := parse(newFlags("audit"), args)
+	pos, err := parse(newFlags(cmdAudit), args)
 	if err != nil {
 		return err
 	}
-	if len(pos) != 1 || pos[0] != "aliases" {
-		return fmt.Errorf("%w: audit takes aliases", ErrUsage)
+	if len(pos) != 1 || pos[0] != cmdAliases {
+		page := cmdAudit
+		if len(pos) > 0 && pos[0] == cmdAliases {
+			page = "audit aliases"
+		}
+		return &commandError{command: page, err: fmt.Errorf("%w: audit takes aliases", ErrUsage)}
 	}
 	known, err := d.knownAliases()
 	if err != nil {
