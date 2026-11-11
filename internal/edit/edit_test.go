@@ -60,6 +60,7 @@ func (f *fakeCZ) EditConfig(context.Context) (chez.EditConfig, error) {
 	cfg.WorkingTree = f.wt
 	return cfg, nil
 }
+
 func (f *fakeCZ) Dump(_ context.Context, o chez.Overrides) (chez.State, error) {
 	if o == nil {
 		return f.next("here", f.here)

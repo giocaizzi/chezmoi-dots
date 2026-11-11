@@ -227,16 +227,9 @@ func (s *Service) editSource(ctx context.Context, e *registry.Entry, file string
 		return fmt.Errorf("read edit settings: %w", err)
 	}
 	path := filepath.Join(s.Src, filepath.FromSlash(file))
-	repoFile, err := sourceGitPath(cfg, path)
+	repoFile, sourceBefore, err := sourceGitSnapshot(cfg, path)
 	if err != nil {
 		return err
-	}
-	var sourceBefore [32]byte
-	if repoFile != "" {
-		sourceBefore, err = sum(path)
-		if err != nil {
-			return err
-		}
 	}
 	scratch, err := os.MkdirTemp("", "dots-")
 	if err != nil {
