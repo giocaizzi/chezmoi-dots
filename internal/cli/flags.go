@@ -16,7 +16,7 @@ func newFlags(name string) *flag.FlagSet {
 	case cmdBump:
 		fs.Bool("dry-run", false, "show what would change, write nothing")
 	case cmdUpgrade:
-		fs.Bool("dry-run", false, "show the commands, run nothing")
+		fs.Bool("dry-run", false, "show upgrade commands without executing upgrade steps")
 	case cmdLive:
 		fs.String("bin", "chezmoi", "chezmoi `executable`")
 		fs.String("src", "", "shadow source `directory`")

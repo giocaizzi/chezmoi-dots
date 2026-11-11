@@ -124,7 +124,7 @@ func TestHelpContent(t *testing.T) {
 		{[]string{"audit", "aliases"}, []string{"ENVIRONMENT", "XDG_CONFIG_HOME"}, []string{"COMMANDS"}},
 		{[]string{"outdated"}, []string{"--offline", "--fetch", "--check", "ENVIRONMENT", "CHEZMOI_WORKING_TREE"}, nil},
 		{[]string{"bump"}, []string{"ARGUMENTS", "--dry-run", "ENVIRONMENT", "CHEZMOI_SOURCE_DIR"}, []string{"COMMANDS"}},
-		{[]string{"upgrade"}, []string{"ARGUMENTS", "--dry-run", "ENVIRONMENT", "CHEZMOI_EXECUTABLE"}, []string{"COMMANDS"}},
+		{[]string{"upgrade"}, []string{"ARGUMENTS", "--dry-run", "ENVIRONMENT", "CHEZMOI_EXECUTABLE", "show upgrade commands without executing upgrade steps", "Default dry run still checks pinned releases and can use the network."}, []string{"COMMANDS", "run nothing"}},
 		{[]string{"live"}, []string{"--global", "--bin", "--src", "Internal", "chezmoi"}, nil},
 	}
 	for _, tt := range tests {
