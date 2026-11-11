@@ -13,6 +13,7 @@ import (
 
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
 	"github.com/giocaizzi/chezmoi-dots/internal/edit"
+	"github.com/giocaizzi/chezmoi-dots/internal/term"
 )
 
 // Deps is everything the commands touch outside the process: tests replace it.
@@ -75,7 +76,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 		cmd = local.command
 	}
 	if errors.Is(err, flag.ErrHelp) {
-		renderHelp(d.Stdout, helpPage(cmd))
+		renderHelp(d.Stdout, helpPage(cmd), term.NewStyle(d.Stdout, d.Getenv))
 		return nil
 	}
 	if errors.Is(err, ErrUsage) {
@@ -84,7 +85,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 			diagnostic = "invalid arguments"
 		}
 		fmt.Fprintf(d.Stderr, "error: %s\n\n", diagnostic)
-		renderHelp(d.Stderr, helpPage(cmd))
+		renderHelp(d.Stderr, helpPage(cmd), term.NewStyle(d.Stderr, d.Getenv))
 	}
 	return err
 }

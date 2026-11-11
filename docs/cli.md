@@ -60,7 +60,8 @@ source directory also honors `.chezmoiroot`. These apply to `edit`, `view`,
 `list`, `lint`, `outdated` and `bump`; `upgrade` uses `CHEZMOI_EXECUTABLE` for its
 dotfiles step. Child tools may use their own environment and configuration.
 
-Styled output is disabled for non-terminal streams, a nonempty `NO_COLOR`, or
+Help uses blue titles and section headings plus mauve command names. Styled
+output is disabled for non-terminal streams, a nonempty `NO_COLOR`, or
 `TERM=dumb`. Executable discovery uses `PATH`; home-relative paths use the
 current user's home directory. Command sections below list additional relevant
 environment. `version` has no command-specific environment.
