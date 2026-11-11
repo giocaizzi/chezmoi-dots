@@ -199,6 +199,76 @@ func TestEditAppliesWhenConfirmed(t *testing.T) {
 	}
 }
 
+func TestEditAppliesAndPushesUsingChezmoiConfig(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	remote := t.TempDir()
+	git(t, remote, "-c", "init.templateDir=", "init", "--bare")
+	git(t, e.src, "-c", "init.templateDir=", "init", "--initial-branch=main")
+	git(t, e.src, "config", "user.name", "Example")
+	git(t, e.src, "config", "user.email", "example@example.com")
+	git(t, e.src, "config", "commit.gpgSign", "false")
+	git(t, e.src, "config", "core.hooksPath", t.TempDir())
+	git(t, e.src, "config", "push.default", "simple")
+	git(t, e.src, "remote", "add", "origin", filepath.ToSlash(remote))
+	git(t, e.src, "add", ".")
+	git(t, e.src, "commit", "-m", "initial")
+	git(t, e.src, "push", "--set-upstream", "origin", "main")
+
+	const staged = "separately-staged.txt"
+	if err := os.WriteFile(filepath.Join(e.src, staged), []byte("separate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, e.src, "add", "--", staged)
+	configureEditAutomation(t, e.vars["CHEZMOI_CONFIG_FILE"])
+	e.editor(t, "more")
+
+	_, stderr, err := e.run(t, "", "edit", "note")
+	if err != nil {
+		t.Fatalf("edit = %v\n%s", err, stderr)
+	}
+	if strings.Contains(stderr, "apply now?") {
+		t.Errorf("stderr = %q, want automatic apply without confirmation", stderr)
+	}
+	if got, err := os.ReadFile(filepath.Join(e.dest, ".note")); err != nil || string(got) != "hello home\nmore" {
+		t.Errorf("applied note = %q, %v, want the edited render", got, err)
+	}
+	if got := git(t, remote, "diff-tree", "--no-commit-id", "--name-only", "-r", "refs/heads/main"); got != "dot_note.tmpl" {
+		t.Errorf("pushed paths = %q, want dot_note.tmpl", got)
+	}
+	if got, want := git(t, remote, "rev-parse", "refs/heads/main"), git(t, e.src, "rev-parse", "HEAD"); got != want {
+		t.Errorf("remote HEAD = %q, want local HEAD %q", got, want)
+	}
+	if got := git(t, e.src, "diff", "--cached", "--name-only"); got != staged {
+		t.Errorf("remaining staged paths = %q, want %q", got, staged)
+	}
+}
+
+func configureEditAutomation(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	if _, err := f.WriteString("\n[edit]\napply = true\n[git]\nautoPush = true\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func git(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := chez.Cmd{Dir: dir, Args: append([]string{"git"}, args...)}
+	out, err := chez.Output(t.Context(), chez.ExecRunner{}, cmd)
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
 func TestEditDeclinedLeavesTheTarget(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
