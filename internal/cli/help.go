@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/giocaizzi/chezmoi-dots/internal/term"
 )
 
 type helpNode struct {
@@ -71,23 +73,23 @@ func (d Deps) help(args []string) error {
 			return &commandError{command: node.path, err: fmt.Errorf("%w: unknown help topic %q", ErrUsage, part)}
 		}
 	}
-	renderHelp(d.Stdout, node)
+	renderHelp(d.Stdout, node, term.NewStyle(d.Stdout, d.Getenv))
 	return nil
 }
 
-func renderHelp(w io.Writer, node helpNode) {
+func renderHelp(w io.Writer, node helpNode, style term.Style) {
 	name := strings.TrimSpace("chezmoi dots " + node.path)
-	fmt.Fprintf(w, "%s — %s\n\nUSAGE\n  %s\n", name, node.summary, node.usage)
+	fmt.Fprintf(w, "%s%s%s — %s\n\n%sUSAGE%s\n  %s\n", style.B, name, style.O, node.summary, style.B, style.O, node.usage)
 	if len(node.children) > 0 {
-		fmt.Fprintln(w, "\nCOMMANDS")
+		fmt.Fprintf(w, "\n%sCOMMANDS%s\n", style.B, style.O)
 		for _, child := range node.children {
 			if !child.hidden {
-				fmt.Fprintf(w, "  %-10s %s\n", strings.TrimPrefix(child.path, node.path+" "), child.summary)
+				fmt.Fprintf(w, "  %s%-10s%s %s\n", style.M, strings.TrimPrefix(child.path, node.path+" "), style.O, child.summary)
 			}
 		}
 	}
-	helpSection(w, "ARGUMENTS", node.arguments)
-	fmt.Fprintln(w, "\nOPTIONS\n  -h, --help  Show this help and exit successfully.")
+	helpSection(w, "ARGUMENTS", node.arguments, style)
+	fmt.Fprintf(w, "\n%sOPTIONS%s\n  -h, --help  Show this help and exit successfully.\n", style.B, style.O)
 	fs := newFlags(node.path)
 	fs.VisitAll(func(f *flag.Flag) {
 		value, description := flag.UnquoteUsage(f)
@@ -97,12 +99,12 @@ func renderHelp(w io.Writer, node helpNode) {
 		}
 		fmt.Fprintf(w, "  %s  %s (default: %q)\n", option, description, f.DefValue)
 	})
-	helpSection(w, "ENVIRONMENT", node.environment)
-	helpSection(w, "EXAMPLES", node.examples)
+	helpSection(w, "ENVIRONMENT", node.environment, style)
+	helpSection(w, "EXAMPLES", node.examples, style)
 }
 
-func helpSection(w io.Writer, heading, text string) {
-	fmt.Fprintf(w, "\n%s\n", heading)
+func helpSection(w io.Writer, heading, text string, style term.Style) {
+	fmt.Fprintf(w, "\n%s%s%s\n", style.B, heading, style.O)
 	for line := range strings.SplitSeq(text, "\n") {
 		fmt.Fprintf(w, "  %s\n", line)
 	}
