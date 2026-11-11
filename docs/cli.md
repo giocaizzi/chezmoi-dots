@@ -242,7 +242,10 @@ chezmoi dots upgrade uv npm --dry-run
 chezmoi dots version
 ```
 
-Print `chezmoi-dots <version>`. No arguments; options are only `-h`, `--help`.
+Print `chezmoi-dots <version>`. No arguments are required. Extra arguments and
+unknown flags are ignored for compatibility. `-h` and `--help` show help only
+when the parser reaches them; an unknown flag stops parsing, so
+`chezmoi dots version --unknown --help` still prints the version.
 Local builds report `devel-<revision>` when VCS metadata is available, otherwise
 `devel`; release builds can stamp a version.
 
