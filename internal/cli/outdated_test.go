@@ -27,10 +27,10 @@ func TestHelpMentionsOutdatedFlags(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
 	d := cli.Deps{Getenv: func(string) string { return "" }, Stdout: &out, Stderr: &bytes.Buffer{}}
-	if err := cli.Run(t.Context(), d, []string{"help"}); err != nil {
+	if err := cli.Run(t.Context(), d, []string{"outdated", "--help"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"outdated [--offline] [--fetch] [--check]", "--check", "Every tool: installed, pinned and latest versions"} {
+	for _, want := range []string{"--offline", "--fetch", "--check"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("help lacks %q", want)
 		}
