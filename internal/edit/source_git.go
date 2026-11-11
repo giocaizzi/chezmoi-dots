@@ -27,15 +27,25 @@ func sourceGitSnapshot(cfg chez.EditConfig, path string) (string, [32]byte, erro
 	return filepath.ToSlash(file), before, err
 }
 
-func (s *Service) saveSource(ctx context.Context, cfg chez.EditConfig, file, path string, before [32]byte) error {
+func verifySource(path string, validated [32]byte) error {
+	current, err := sum(path)
+	if err != nil {
+		return fmt.Errorf("verify source after validation and apply, Git automation skipped: %w", err)
+	}
+	if current != validated {
+		return fmt.Errorf("source %q changed during validation or apply, Git automation skipped", path)
+	}
+	return nil
+}
+
+func (s *Service) saveSource(ctx context.Context, cfg chez.EditConfig, file, path string, before, validated [32]byte) error {
 	if file == "" {
 		return nil
 	}
-	after, err := sum(path)
-	if err != nil {
+	if err := verifySource(path, validated); err != nil {
 		return err
 	}
-	if before == after {
+	if before == validated {
 		return nil
 	}
 	status, err := s.Git.FileStatus(ctx, cfg.WorkingTree, file)
@@ -44,6 +54,9 @@ func (s *Service) saveSource(ctx context.Context, cfg chez.EditConfig, file, pat
 	}
 	if status == "" {
 		return nil
+	}
+	if err = verifySource(path, validated); err != nil {
+		return err
 	}
 	if err = s.Git.Stage(ctx, cfg.WorkingTree, file); err != nil {
 		return fmt.Errorf("stage %q: %w", file, err)
@@ -57,6 +70,9 @@ func (s *Service) saveSource(ctx context.Context, cfg chez.EditConfig, file, pat
 	}
 	if status == "" || status[0] == ' ' || status[0] == '?' {
 		return nil
+	}
+	if err = verifySource(path, validated); err != nil {
+		return err
 	}
 	if err = s.Git.Commit(ctx, cfg.WorkingTree, file); err != nil {
 		return fmt.Errorf("commit %q: %w", file, err)

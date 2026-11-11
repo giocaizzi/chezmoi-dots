@@ -252,6 +252,7 @@ func TestEditDeclinedAppliesNothing(t *testing.T) {
 
 type applyRewriter struct {
 	*fakeCZ
+
 	path string
 }
 
@@ -261,18 +262,25 @@ func (f applyRewriter) Apply(context.Context, io.Writer, io.Writer, ...string) e
 
 func TestEditDoesNotPublishSourceChangedDuringApply(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: a source change during apply bypasses validation", func(t *testing.T) {
-		t.Parallel()
-		t.Skip("xfail: pending a check that the source still matches the validated edit")
-		r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "a.md"}, st("1"), st("2"))
-		r.cz.config.Edit.Apply = true
-		r.cz.config.Git.AutoPush = true
-		r.svc.CZ = applyRewriter{fakeCZ: r.cz, path: filepath.Join(r.src, "a.md")}
-		_ = r.svc.Run(t.Context(), "a")
-		if len(r.git.actions) != 0 {
-			t.Errorf("Git actions = %v, want none for a source file changed after validation", r.git.actions)
-		}
-	})
+	r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "a.md"}, st("1"), st("2"))
+	r.cz.config.Edit.Apply = true
+	r.cz.config.Git.AutoPush = true
+	path := filepath.Join(r.src, "a.md")
+	r.svc.CZ = applyRewriter{fakeCZ: r.cz, path: path}
+	err := r.svc.Run(t.Context(), "a")
+	if err == nil || !strings.Contains(err.Error(), "Git automation skipped") {
+		t.Errorf("Run() = %v, want an error explaining why Git automation was skipped", err)
+	}
+	if len(r.git.actions) != 0 {
+		t.Errorf("Git actions = %v, want none for a source file changed after validation", r.git.actions)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "changed after validation" {
+		t.Errorf("source = %q, want the later edit kept", got)
+	}
 }
 
 func TestEditGitSettings(t *testing.T) {

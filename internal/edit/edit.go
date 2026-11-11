@@ -258,7 +258,8 @@ func (s *Service) editSource(ctx context.Context, e *registry.Entry, file string
 			return err
 		}
 	}
-	if err = s.runCheck(ctx, e, cfg.WorkingTree, edited, path); err != nil {
+	sourceValidated, err := s.checkSource(ctx, e, cfg.WorkingTree, edited, path, repoFile)
+	if err != nil {
 		return err
 	}
 	after := s.snapshot(ctx, entries)
@@ -272,7 +273,7 @@ func (s *Service) editSource(ctx context.Context, e *registry.Entry, file string
 	if err = s.apply(ctx, e, before, after, cfg.Edit.Apply); err != nil {
 		return err
 	}
-	if err = s.saveSource(ctx, cfg, repoFile, path, sourceBefore); err != nil {
+	if err = s.saveSource(ctx, cfg, repoFile, path, sourceBefore, sourceValidated); err != nil {
 		return err
 	}
 	s.reportSourceChanges(ctx, cfg.WorkingTree)
@@ -316,16 +317,24 @@ func (s *Service) openEditor(ctx context.Context, file, path, edited, scratch st
 	return sumAfter != sumBefore, nil
 }
 
-// runCheck runs the entry's check command, if it has one, on the edited file.
-func (s *Service) runCheck(ctx context.Context, e *registry.Entry, wt, edited, path string) error {
+// checkSource records the source entering validation and runs the entry's check.
+func (s *Service) checkSource(ctx context.Context, e *registry.Entry, wt, edited, path, repoFile string) ([32]byte, error) {
+	var checksum [32]byte
+	if repoFile != "" {
+		var err error
+		checksum, err = sum(path)
+		if err != nil {
+			return checksum, err
+		}
+	}
 	if e == nil || len(e.Check) == 0 {
-		return nil
+		return checksum, nil
 	}
 	if err := s.Check.Check(ctx, wt, withFile(e.Check, edited)); err != nil {
 		fmt.Fprintf(s.Err, "%s✗ Check failed, nothing applied.%s The source keeps the edit: run the command again to fix it (%s).\n", s.Style.R, s.Style.O, path)
-		return ErrReported
+		return checksum, ErrReported
 	}
-	return nil
+	return checksum, nil
 }
 
 func (s *Service) reencrypt(ctx context.Context, edited, path string) error {
