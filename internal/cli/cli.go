@@ -13,7 +13,6 @@ import (
 
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
 	"github.com/giocaizzi/chezmoi-dots/internal/edit"
-	"github.com/giocaizzi/chezmoi-dots/internal/term"
 )
 
 // Deps is everything the commands touch outside the process: tests replace it.
@@ -37,124 +36,112 @@ var ErrReported = edit.ErrReported
 // ErrUsage is returned for a command line that makes no sense.
 var ErrUsage = edit.ErrUsage
 
-const cmdEdit = "edit"
+const (
+	cmdEdit     = "edit"
+	cmdView     = "view"
+	cmdList     = "list"
+	cmdLint     = "lint"
+	cmdAudit    = "audit"
+	cmdAliases  = "aliases"
+	cmdOutdated = "outdated"
+	cmdBump     = "bump"
+	cmdUpgrade  = "upgrade"
+	cmdLive     = "live"
+	cmdVersion  = "version"
+	cmdHelp     = "help"
+)
+
+type commandError struct {
+	command string
+	err     error
+}
+
+func (e *commandError) Error() string { return e.err.Error() }
+func (e *commandError) Unwrap() error { return e.err }
 
 // Run runs one command line (the arguments after `chezmoi dots`).
 func Run(ctx context.Context, d Deps, args []string) error {
 	cmd, rest := cmdEdit, args
 	if len(args) > 0 {
 		switch args[0] {
-		case cmdEdit, "view", "list", "lint", "audit", "outdated", "bump", "upgrade", "live", "version", "help":
+		case cmdEdit, cmdView, cmdList, cmdLint, cmdAudit, cmdOutdated, cmdBump, cmdUpgrade, cmdLive, cmdVersion, cmdHelp:
 			cmd, rest = args[0], args[1:]
 		case "-h", "--help":
-			cmd = "help"
+			cmd, rest = "", args
 		}
 	}
+	err := d.run(ctx, cmd, rest)
+	if local, ok := errors.AsType[*commandError](err); ok {
+		cmd = local.command
+	}
+	if errors.Is(err, flag.ErrHelp) {
+		renderHelp(d.Stdout, helpPage(cmd))
+		return nil
+	}
+	if errors.Is(err, ErrUsage) {
+		diagnostic := strings.TrimPrefix(err.Error(), ErrUsage.Error()+": ")
+		if diagnostic == ErrUsage.Error() || diagnostic == "" {
+			diagnostic = "invalid arguments"
+		}
+		fmt.Fprintf(d.Stderr, "error: %s\n\n", diagnostic)
+		renderHelp(d.Stderr, helpPage(cmd))
+	}
+	return err
+}
+
+func (d Deps) run(ctx context.Context, cmd string, args []string) error {
 	switch cmd {
 	case cmdEdit:
-		return d.edit(ctx, rest)
-	case "view":
-		return d.view(ctx, rest)
-	case "list":
-		return d.list(ctx, rest)
-	case "lint":
-		return d.lint(ctx, rest)
-	case "audit":
-		return d.audit(ctx, rest)
-	case "outdated":
-		return d.outdated(ctx, rest)
-	case "bump":
-		return d.bump(ctx, rest)
-	case "upgrade":
-		return d.upgrade(ctx, rest)
-	case "live":
-		return d.live(ctx, rest)
-	case "version":
+		return d.edit(ctx, args)
+	case cmdView:
+		return d.view(ctx, args)
+	case cmdList:
+		return d.list(ctx, args)
+	case cmdLint:
+		return d.lint(ctx, args)
+	case cmdAudit:
+		return d.audit(ctx, args)
+	case cmdOutdated:
+		return d.outdated(ctx, args)
+	case cmdBump:
+		return d.bump(ctx, args)
+	case cmdUpgrade:
+		return d.upgrade(ctx, args)
+	case cmdLive:
+		return d.live(ctx, args)
+	case cmdVersion:
+		if _, err := parse(newFlags(cmd), args); err != nil {
+			return err
+		}
 		fmt.Fprintln(d.Stdout, "chezmoi-dots", d.Version)
 		return nil
+	case cmdHelp:
+		return d.help(args)
 	default:
-		s := term.NewStyle(d.Stdout, d.Getenv)
-		fmt.Fprint(d.Stdout, usage(s))
-		return nil
+		_, err := parse(newFlags(""), args)
+		return err
 	}
 }
 
 // parse parses flags that may come before or after the positional arguments.
 func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
 	var pos []string
 	for {
 		if err := fs.Parse(args); err != nil {
-			if errors.Is(err, flag.ErrHelp) {
-				return nil, ErrUsage
+			if !errors.Is(err, flag.ErrHelp) {
+				err = fmt.Errorf("%w: %w", ErrUsage, err)
 			}
-			return nil, fmt.Errorf("%w: %w", ErrUsage, err)
+			return nil, &commandError{command: fs.Name(), err: err}
 		}
 		if fs.NArg() == 0 {
 			return pos, nil
 		}
 		pos = append(pos, fs.Arg(0))
+		if fs.Name() == cmdAudit && len(pos) == 1 && pos[0] == cmdAliases {
+			fs.Init("audit aliases", flag.ContinueOnError)
+		}
 		args = fs.Args()[1:]
 	}
-}
-
-func usage(s term.Style) string {
-	b := s.B // bold blue
-	m := s.M // mauve
-	y := s.Y // yellow
-	d := s.D // dim overlay0
-	o := s.O // reset
-
-	var sb strings.Builder
-	p := func(format string, a ...any) {
-		fmt.Fprintf(&sb, format, a...)
-	}
-
-	p("%schezmoi dots%s %s— Manage, verify and render dotfiles across 9 OS/role matrix configurations%s\n\n", b, o, d, o)
-
-	p("%sUSAGE%s\n", b, o)
-	p("  %schezmoi dots%s %s[edit]%s %s[<what>]%s\n", m, o, y, o, d, o)
-	p("  %schezmoi dots%s %sview%s %s[--matrix] [--all]%s %s[<what>]%s %s[--as <os>[,<role>]]%s\n", m, o, m, o, d, o, y, o, d, o)
-	p("  %schezmoi dots%s %slist%s\n", m, o, m, o)
-	p("  %schezmoi dots%s %slint%s %s[registry|aliases|packages|matrix|templates]...%s\n", m, o, m, o, d, o)
-	p("  %schezmoi dots%s %saudit%s %saliases%s\n", m, o, m, o, y, o)
-	p("  %schezmoi dots%s %soutdated%s %s[--offline] [--fetch] [--check]%s\n", m, o, m, o, d, o)
-	p("  %schezmoi dots%s %sbump%s %s[--dry-run]%s %s[<release>]...%s\n", m, o, m, o, d, o, d, o)
-	p("  %schezmoi dots%s %supgrade%s %s[--dry-run]%s %s[<step>]...%s\n", m, o, m, o, d, o, d, o)
-	p("  %schezmoi dots%s %sversion%s %s│%s %shelp%s\n\n", m, o, m, o, d, o, m, o)
-
-	p("%sCOMMANDS%s\n", b, o)
-	p("  %s%-9s%s %s%-27s%s %s\n", m, "edit", o, d, "[<what>]", o, "Edit dotfiles source and verify across 9 matrix configs")
-	p("  %s%-9s%s %s%-27s%s %s\n", m, "view", o, y, "<what>", o, "Preview rendered target or composition tree")
-	p("  %s%-9s%s %-27s %s\n", m, "list", o, "", "List configured editable registry components")
-	p("  %s%-9s%s %s%-27s%s %s\n", m, "lint", o, d, "[<check>...]", o, "Check registries, config templates, and rendered scripts")
-	p("  %s%-9s%s %s%-27s%s %s\n", m, "audit", o, y, "aliases", o, "Detect unmanaged live shell aliases")
-	p("  %s%-9s%s %-27s %s\n", m, "outdated", o, "", "Every tool: installed, pinned and latest versions")
-	p("  %s%-9s%s %s%-27s%s %s\n", m, "bump", o, d, "[--dry-run] [<release>...]", o, "Update pinned checksums and tool versions")
-	p("  %s%-9s%s %s%-27s%s %s\n", m, "upgrade", o, d, "[--dry-run] [<step>...]", o, "Execute sequential system/dotfile upgrade steps")
-	p("  %s%-9s%s %-27s %s\n", m, "version", o, "", "Print chezmoi-dots version information")
-	p("  %s%-9s%s %-27s %s\n\n", m, "help", o, "", "Display this help message")
-
-	p("%sFLAGS%s\n", b, o)
-	p("  %s--as%s %s<os>[,<role>]%s    Render single matrix target (os: darwin|linux|windows; role: personal|work|light)\n", y, o, d, o)
-	p("  %s--matrix%s              Render matrix grid preview or overview across all configurations\n", y, o)
-	p("  %s--all%s                 Overview across all registry entries\n", y, o)
-	p("  %s--dry-run%s             Simulate modifications without writing to disk\n", y, o)
-	p("  %s--offline%s             outdated: skip network lookups\n", y, o)
-	p("  %s--fetch%s               outdated: git fetch the dotfiles first\n", y, o)
-	p("  %s--check%s               outdated: exit non-zero when anything is outdated, drifted or not installed\n\n", y, o)
-
-	p("%sEXAMPLES%s\n", b, o)
-	p("  %sdots%s                             Interactive picker for editable components\n", m, o)
-	p("  %sdots view --matrix%s               Overview of all registry entries across OS and role configurations\n", m, o)
-	p("  %sdots agents/work%s                 Edit an entry in private temp copy with live pane diff\n", m, o)
-	p("  %sdots view ~/.claude/CLAUDE.md%s    Display composition tree and target content\n", m, o)
-	p("  %sdots view dot_config/git/config.tmpl --matrix%s\n                                Render and diff all 9 matrix configurations\n", m, o)
-	p("  %sdots lint%s                        Validate all dotfiles registries and rendered templates\n\n", m, o)
-
-	p("%sDOCUMENTATION%s\n", b, o)
-	p("  %shttps://github.com/giocaizzi/chezmoi-dots#readme%s\n", d, o)
-	p("  %shttps://github.com/giocaizzi/chezmoi-dots#commands-reference%s\n", d, o)
-
-	return sb.String()
 }
