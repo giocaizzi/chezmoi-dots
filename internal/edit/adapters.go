@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -91,11 +92,40 @@ func (c ExecChecker) Check(ctx context.Context, dir string, argv []string) error
 	return c.Runner.Run(ctx, chez.Cmd{Args: argv, Dir: dir, Stdout: io.Discard, Stderr: c.Stderr})
 }
 
-// ExecGit asks git for the status of a working tree.
+// ExecGit runs Git operations on a working tree.
 type ExecGit struct{ Runner chez.Runner }
 
 // Status implements Git.
 func (g ExecGit) Status(ctx context.Context, dir string) (string, error) {
 	out, err := chez.Output(ctx, g.Runner, chez.Cmd{Args: []string{"git", "-C", dir, "status", "--short"}})
 	return strings.TrimRight(string(out), "\n"), err
+}
+
+// FileStatus reports staged, unstaged, and untracked changes for path.
+func (g ExecGit) FileStatus(ctx context.Context, dir, path string) (string, error) {
+	out, err := g.run(ctx, dir, "status", "--porcelain=v1", "--no-renames", "-uall", "--", path)
+	return strings.TrimRight(string(out), "\r\n"), err
+}
+
+// Stage adds only path to the index.
+func (g ExecGit) Stage(ctx context.Context, dir, path string) error {
+	_, err := g.run(ctx, dir, "add", "--", path)
+	return err
+}
+
+// Commit records only path, leaving other staged changes in the index.
+func (g ExecGit) Commit(ctx context.Context, dir, path string) error {
+	_, err := g.run(ctx, dir, "commit", "--only", "-m", "chore: update "+filepath.Base(path), "--", path)
+	return err
+}
+
+// Push sends the current branch using Git's configured push behavior.
+func (g ExecGit) Push(ctx context.Context, dir string) error {
+	_, err := g.run(ctx, dir, "push")
+	return err
+}
+
+func (g ExecGit) run(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	argv := append([]string{"git", "--literal-pathspecs", "-C", dir}, args...)
+	return chez.Output(ctx, g.Runner, chez.Cmd{Args: argv})
 }
