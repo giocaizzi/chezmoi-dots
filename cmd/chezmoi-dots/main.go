@@ -49,8 +49,7 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdin i
 	case errors.Is(ctx.Err(), context.Canceled):
 		return 130
 	case errors.Is(err, cli.ErrUsage):
-		fmt.Fprintf(stderr, "chezmoi-dots: %v (chezmoi dots help)\n", err)
-		return 2
+		return 2 // cli.Run already printed the diagnostic and command-local help.
 	default:
 		fmt.Fprintf(stderr, "chezmoi-dots: %v\n", err)
 		return 1
