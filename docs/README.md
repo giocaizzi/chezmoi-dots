@@ -2,6 +2,9 @@
 
 Source of truth for decisions, architecture and runbooks of this repo.
 
+- [Command reference](cli.md): arguments, options, defaults, environment and help/error semantics.
+- [Build and install locally](local-build-install.md): checks, build, optional installation, verification and rollback.
+
 ## Apply and publish source edits
 
 Configure the existing [chezmoi settings](https://www.chezmoi.io/reference/configuration-file/variables/)

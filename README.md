@@ -26,8 +26,8 @@ Declarative registry-driven editing, package inventory drift detection, automate
 - **Registry-Driven Editing (`dots <target>`)**: Open dotfiles by logical alias (`dots zsh`, `dots git`, `dots ssh/config`) with pre-save linters, atomic temp files, and post-save formatters.
 - **Zero-Config Fallback**: Works on any `chezmoi managed` repository without configuration—fuzzy pick and edit any managed target directly.
 - **Inventory & Drift Audit (`dots outdated`, `dots bump`)**: Query Homebrew, Pacman, Apt, and GitHub Releases to detect version drift against your pins. Update pins with comment-preserving text edits.
-- **Live Preview (`dots live`)**: Watch edited template sources and render live updates to a side pane using tmux or Windows Terminal.
-- **Template Dependency Graph (`dots tree`)**: Visualize template AST dependency graphs, detect cycles, and trace which roles or OS targets consume which snippets.
+- **Live Preview**: Editing can render live updates to a side pane using tmux or Windows Terminal; `live` is the internal pane command.
+- **Template Composition (`dots view`)**: Inspect a target's composition tree and rendered content, including previews across OS/role configurations.
 - **Template Linting (`dots lint`)**: Verify template syntax, detect unrendered delimiters, and validate cross-OS matrix configurations.
 
 ---
@@ -69,15 +69,21 @@ go install github.com/giocaizzi/chezmoi-dots/cmd/chezmoi-dots@latest
 
 | Command | Arguments | Description |
 |---|---|---|
-| `dots <alias>` | `[target]` | Open mapped target in `$EDITOR` with atomic save & lint |
-| `dots list` | `[pattern]` | List managed targets, aliases, and templates |
-| `dots live` | `<target>` | Watch file and render live preview in side tmux/terminal pane |
-| `dots tree` | `[target]` | Render template dependency tree and composition graph |
-| `dots outdated` | `[flags]` | Survey installed packages against pins and upstream releases |
-| `dots bump` | `[package]` | Fetch latest releases and update pinned versions in registry |
-| `dots upgrade` | `[flags]` | Update packages via their native package managers |
-| `dots lint` | `[flags]` | Lint registries, template syntax, and matrix rules |
+| `dots [edit]` | `[<what>]` | Edit a registry entry, source file or managed target; omitting the selector opens a picker |
+| `dots view` | `[<what>]` | Preview rendered content and composition; supports matrix overviews |
+| `dots list` | none | List configured editable registry components |
+| `dots lint` | `[<check>...]` | Lint registries, template syntax, and matrix rules |
 | `dots audit` | `aliases` | Audit live shell environment against alias registry |
+| `dots outdated` | none | Survey installed packages against pins and upstream releases |
+| `dots bump` | `[<release>...]` | Fetch latest releases and update pinned versions in registry |
+| `dots upgrade` | `[<step>...]` | Update dotfiles and tools via their native managers |
+| `dots version` | none | Print the binary version |
+| `dots help` | `[<command> [<child>]]` | Show root or local help |
+
+Use `dots <command> --help` for command-specific options. See the full
+[command reference](docs/cli.md) for defaults, environment, parsing and exit
+semantics, including the internal `live` command. For source builds, see
+[Build and install locally](docs/local-build-install.md).
 
 See [Apply and publish source edits](docs/README.md#apply-and-publish-source-edits) for the chezmoi settings that control apply and Git automation.
 
