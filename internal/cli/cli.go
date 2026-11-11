@@ -110,7 +110,7 @@ func (d Deps) run(ctx context.Context, cmd string, args []string) error {
 	case cmdLive:
 		return d.live(ctx, args)
 	case cmdVersion:
-		if _, err := parse(newFlags(cmd), args); err != nil {
+		if _, err := parse(newFlags(cmd), args); errors.Is(err, flag.ErrHelp) {
 			return err
 		}
 		fmt.Fprintln(d.Stdout, "chezmoi-dots", d.Version)

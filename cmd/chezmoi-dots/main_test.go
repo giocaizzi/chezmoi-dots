@@ -24,7 +24,7 @@ func testGetenv(key string) string {
 
 func TestRunHelp(t *testing.T) {
 	t.Parallel()
-	for _, args := range [][]string{{"-h"}, {"--help"}, {"help"}, {"view", "--help"}, {"audit", "aliases", "-h"}, {"help", "live"}, {"help", "help"}} {
+	for _, args := range [][]string{{"-h"}, {"--help"}, {"help"}, {"view", "--help"}, {"audit", "aliases", "-h"}, {"help", "live"}, {"help", "help"}, {"version", "-h"}, {"version", "--help"}, {"version", "extra", "--help"}, {"audit", "--help", "aliases"}, {"audit", "aliases", "--help"}} {
 		t.Run(strings.Join(args, "/"), func(t *testing.T) {
 			t.Parallel()
 			var out, errw bytes.Buffer
@@ -33,6 +33,22 @@ func TestRunHelp(t *testing.T) {
 			}
 			if !strings.Contains(out.String(), "USAGE") || errw.Len() != 0 {
 				t.Errorf("stdout %q, stderr %q", out.String(), errw.String())
+			}
+		})
+	}
+}
+
+func TestRunVersionIgnoredArguments(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{{"version", "--unknown"}, {"version", "--as=linux"}, {"version", "extra"}, {"version", "--unknown", "--help"}} {
+		t.Run(strings.Join(args, "/"), func(t *testing.T) {
+			t.Parallel()
+			var out, errw bytes.Buffer
+			if code := run(t.Context(), args, testGetenv, strings.NewReader(""), &out, &errw); code != 0 {
+				t.Errorf("exit = %d, want 0", code)
+			}
+			if !strings.HasPrefix(out.String(), "chezmoi-dots ") || strings.Contains(out.String(), "USAGE") || errw.Len() != 0 {
+				t.Errorf("stdout %q, stderr %q; want version only", out.String(), errw.String())
 			}
 		})
 	}

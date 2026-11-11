@@ -21,21 +21,25 @@ type helpTrap struct{ calls []string }
 
 func (s *helpTrap) Run(_ context.Context, c chez.Cmd) error {
 	s.calls = append(s.calls, "process: "+strings.Join(c.Args, " "))
-	return fmt.Errorf("unexpected process")
+	return errors.New("unexpected process")
 }
+
 func (s *helpTrap) Read(_ []byte) (int, error) {
 	s.calls = append(s.calls, "input")
-	return 0, fmt.Errorf("unexpected input")
+	return 0, errors.New("unexpected input")
 }
+
 func (s *helpTrap) RoundTrip(_ *http.Request) (*http.Response, error) {
 	s.calls = append(s.calls, "http")
-	return nil, fmt.Errorf("unexpected network")
+	return nil, errors.New("unexpected network")
 }
+
 func (s *helpTrap) deps(out, errw *bytes.Buffer) cli.Deps {
-	return cli.Deps{Stdout: out, Stderr: errw, Stdin: s, Runner: s,
+	return cli.Deps{
+		Stdout: out, Stderr: errw, Stdin: s, Runner: s,
 		LookPath: func(name string) (string, error) {
 			s.calls = append(s.calls, "lookpath: "+name)
-			return "", fmt.Errorf("unexpected lookup")
+			return "", errors.New("unexpected lookup")
 		},
 		HTTP: &http.Client{Transport: s}, Home: filepath.Join("testdata", "missing-home"), GOOS: "linux", Version: "test",
 		Getenv: func(key string) string {
@@ -58,26 +62,49 @@ func TestLocalHelp(t *testing.T) {
 			t.Parallel()
 			var canonical string
 			for _, variant := range [][]string{append(append([]string{}, page...), "-h"), append(append([]string{}, page...), "--help"), append([]string{"help"}, page...)} {
-				var out, errw bytes.Buffer
-				trap := &helpTrap{}
-				err := cli.Run(t.Context(), trap.deps(&out, &errw), variant)
-				if err != nil || errw.Len() != 0 {
-					t.Errorf("Run(%q) = %v, stderr %q; want success on stdout", variant, err, errw.String())
-				}
-				if len(trap.calls) != 0 {
-					t.Errorf("Run(%q) touched external boundaries: %v", variant, trap.calls)
-				}
-				text := out.String()
-				for _, heading := range []string{"USAGE", "OPTIONS", "EXAMPLES"} {
-					if !strings.Contains(text, heading) {
-						t.Errorf("Run(%q) lacks %s", variant, heading)
-					}
-				}
+				text := localHelp(t, variant)
 				if canonical == "" {
 					canonical = text
 				} else if canonical != text {
 					t.Errorf("Run(%q) differs from local -h", variant)
 				}
+			}
+		})
+	}
+}
+
+func localHelp(t *testing.T, args []string) string {
+	t.Helper()
+	var out, errw bytes.Buffer
+	trap := &helpTrap{}
+	err := cli.Run(t.Context(), trap.deps(&out, &errw), args)
+	if err != nil || errw.Len() != 0 {
+		t.Errorf("Run(%q) = %v, stderr %q; want success on stdout", args, err, errw.String())
+	}
+	if len(trap.calls) != 0 {
+		t.Errorf("Run(%q) touched external boundaries: %v", args, trap.calls)
+	}
+	text := out.String()
+	for _, heading := range []string{"USAGE", "OPTIONS", "EXAMPLES"} {
+		if !strings.Contains(text, heading) {
+			t.Errorf("Run(%q) lacks %s", args, heading)
+		}
+	}
+	return text
+}
+
+func TestVersionIgnoredArguments(t *testing.T) {
+	t.Parallel()
+	for _, args := range [][]string{{"version", "--unknown"}, {"version", "--as=linux"}, {"version", "extra"}, {"version", "--unknown", "--help"}} {
+		t.Run(strings.Join(args, "/"), func(t *testing.T) {
+			t.Parallel()
+			var out, errw bytes.Buffer
+			trap := &helpTrap{}
+			if err := cli.Run(t.Context(), trap.deps(&out, &errw), args); err != nil {
+				t.Errorf("Run(%q) = %v, want success", args, err)
+			}
+			if out.String() != "chezmoi-dots test\n" || errw.Len() != 0 || len(trap.calls) != 0 {
+				t.Errorf("stdout %q, stderr %q, calls %v; want version only", out.String(), errw.String(), trap.calls)
 			}
 		})
 	}
@@ -89,7 +116,7 @@ func TestHelpContent(t *testing.T) {
 		page         []string
 		want, absent []string
 	}{
-		{nil, []string{"edit", "view", "list", "lint", "audit", "outdated", "bump", "upgrade", "version", "help", "COMMANDS", "--help", "-h", "default"}, []string{"--as", "--matrix", "--all", "--dry-run", "--offline", "--fetch", "--check", "live"}},
+		{nil, []string{"edit", "view", "list", "lint", "audit", "outdated", "bump", "upgrade", "version", "help", "COMMANDS", "--help", "-h", "default"}, []string{"--as", "--matrix", "--all", "--dry-run", "--offline", "--fetch", "--check", "\n  live "}},
 		{[]string{"edit"}, []string{"ARGUMENTS", "ENVIRONMENT", "CHEZMOI_SOURCE_DIR", "EDITOR"}, nil},
 		{[]string{"view"}, []string{"ARGUMENTS", "ENVIRONMENT", "--as", "--matrix", "--all", "CHEZMOI_SOURCE_DIR"}, nil},
 		{[]string{"lint"}, []string{"ARGUMENTS", "registry", "aliases", "packages", "matrix", "templates"}, []string{"COMMANDS"}},
@@ -98,7 +125,7 @@ func TestHelpContent(t *testing.T) {
 		{[]string{"outdated"}, []string{"--offline", "--fetch", "--check", "ENVIRONMENT", "CHEZMOI_WORKING_TREE"}, nil},
 		{[]string{"bump"}, []string{"ARGUMENTS", "--dry-run", "ENVIRONMENT", "CHEZMOI_SOURCE_DIR"}, []string{"COMMANDS"}},
 		{[]string{"upgrade"}, []string{"ARGUMENTS", "--dry-run", "ENVIRONMENT", "CHEZMOI_EXECUTABLE"}, []string{"COMMANDS"}},
-		{[]string{"live"}, []string{"--global", "--bin", "--src", "internal", "chezmoi"}, nil},
+		{[]string{"live"}, []string{"--global", "--bin", "--src", "Internal", "chezmoi"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(strings.Join(tt.page, "/"), func(t *testing.T) {
@@ -116,6 +143,65 @@ func TestHelpContent(t *testing.T) {
 			for _, absent := range tt.absent {
 				if strings.Contains(out.String(), absent) {
 					t.Errorf("help %q contains %q", tt.page, absent)
+				}
+			}
+		})
+	}
+}
+
+func TestHelpAuditPageContext(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		args, page []string
+	}{
+		{[]string{"audit", "--help", "aliases"}, []string{"audit"}},
+		{[]string{"audit", "aliases", "--help"}, []string{"audit", "aliases"}},
+	} {
+		t.Run(strings.Join(tt.args, "/"), func(t *testing.T) {
+			t.Parallel()
+			var out, errw, want, unused bytes.Buffer
+			trap := &helpTrap{}
+			if err := cli.Run(t.Context(), trap.deps(&out, &errw), tt.args); err != nil {
+				t.Fatal(err)
+			}
+			if err := cli.Run(t.Context(), trap.deps(&want, &unused), append([]string{"help"}, tt.page...)); err != nil {
+				t.Fatal(err)
+			}
+			if out.String() != want.String() || errw.Len() != 0 || len(trap.calls) != 0 {
+				t.Errorf("stdout %q, stderr %q, calls %v; want page %q", out.String(), errw.String(), trap.calls, tt.page)
+			}
+		})
+	}
+}
+
+func TestHelpOptionDefaults(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		page     string
+		options  []string
+		defValue string
+	}{
+		{"view", []string{"--as <os[,role]>"}, ""},
+		{"view", []string{"--matrix", "--all"}, "false"},
+		{"outdated", []string{"--offline", "--fetch", "--check"}, "false"},
+		{"bump", []string{"--dry-run"}, "false"},
+		{"upgrade", []string{"--dry-run"}, "false"},
+		{"live", []string{"--bin <executable>"}, "chezmoi"},
+		{"live", []string{"--src <directory>", "--real-src <directory>", "--file <file>", "--edited <file>", "--dir <directory>", "--global <argument>"}, ""},
+	} {
+		t.Run(tt.page+"/"+tt.options[0], func(t *testing.T) {
+			t.Parallel()
+			var out, errw bytes.Buffer
+			trap := &helpTrap{}
+			if err := cli.Run(t.Context(), trap.deps(&out, &errw), []string{"help", tt.page}); err != nil {
+				t.Fatal(err)
+			}
+			for _, option := range tt.options {
+				found := slices.ContainsFunc(strings.Split(out.String(), "\n"), func(line string) bool {
+					return strings.HasPrefix(line, "  "+option+"  ") && strings.HasSuffix(line, fmt.Sprintf("(default: %q)", tt.defValue))
+				})
+				if !found {
+					t.Errorf("help %s lacks option %q with default %q", tt.page, option, tt.defValue)
 				}
 			}
 		})
@@ -161,7 +247,7 @@ func TestHelpInvalidPath(t *testing.T) {
 
 func TestHelpInterspersed(t *testing.T) {
 	t.Parallel()
-	for _, args := range [][]string{{"edit", "note", "--help"}, {"view", "note", "--matrix", "-h"}, {"lint", "registry", "--help"}, {"bump", "release", "--dry-run", "-h"}, {"upgrade", "step", "--help"}, {"edit", "--", "note", "--help"}} {
+	for _, args := range [][]string{{"edit", "note", "--help"}, {"view", "note", "--matrix", "-h"}, {"lint", "registry", "--help"}, {"bump", "release", "--dry-run", "-h"}, {"upgrade", "step", "--help"}, {"version", "extra", "--help"}, {"version", "--help", "--unknown"}, {"edit", "--", "note", "--help"}} {
 		t.Run(strings.Join(args, "/"), func(t *testing.T) {
 			t.Parallel()
 			var out, errw bytes.Buffer
@@ -235,23 +321,29 @@ func TestHelpGoldens(t *testing.T) {
 				t.Fatal(err)
 			}
 			path := filepath.Join("testdata", "help_"+page+".golden")
-			if os.Getenv("UPDATE_GOLDEN") == "1" {
-				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
-					t.Fatal(err)
-				}
-			}
-			want, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("read golden (generate after implementation with UPDATE_GOLDEN=1): %v", err)
-			}
+			want := helpGolden(t, path, out.Bytes())
 			if !bytes.Equal(out.Bytes(), want) {
 				t.Errorf("help differs from %s; review changes before UPDATE_GOLDEN=1", path)
 			}
 		})
 	}
+}
+
+func helpGolden(t *testing.T, path string, got []byte) []byte {
+	t.Helper()
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read golden (generate after implementation with UPDATE_GOLDEN=1): %v", err)
+	}
+	return want
 }
 
 type liveCapture struct{ calls [][]string }
