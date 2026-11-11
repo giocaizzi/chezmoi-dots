@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -32,6 +33,8 @@ type fakeCZ struct {
 	diffed    []string
 	encrypted []byte
 	plain     []byte
+	config    chez.EditConfig
+	applyErr  error
 }
 
 func (f *fakeCZ) next(kind string, states []chez.State) (chez.State, error) {
@@ -51,8 +54,12 @@ func (f *fakeCZ) next(kind string, states []chez.State) (chez.State, error) {
 func (f *fakeCZ) SourcePath(context.Context, string, chez.Overrides) (string, error) {
 	return "", errors.New("not managed")
 }
-func (f *fakeCZ) TargetPath(context.Context) (string, error)  { return f.home, nil }
-func (f *fakeCZ) WorkingTree(context.Context) (string, error) { return f.wt, nil }
+func (f *fakeCZ) TargetPath(context.Context) (string, error) { return f.home, nil }
+func (f *fakeCZ) EditConfig(context.Context) (chez.EditConfig, error) {
+	cfg := f.config
+	cfg.WorkingTree = f.wt
+	return cfg, nil
+}
 func (f *fakeCZ) Dump(_ context.Context, o chez.Overrides) (chez.State, error) {
 	if o == nil {
 		return f.next("here", f.here)
@@ -73,7 +80,7 @@ func (f *fakeCZ) Diff(_ context.Context, _, _ io.Writer, t ...string) error {
 
 func (f *fakeCZ) Apply(_ context.Context, _, _ io.Writer, t ...string) error {
 	f.applied = t
-	return nil
+	return f.applyErr
 }
 
 func (f *fakeCZ) Encrypt(_ context.Context, plain []byte) ([]byte, error) {
@@ -119,9 +126,33 @@ func (p *fakePrompt) Pick(context.Context, string, []string) (string, error) {
 	return "", nil
 }
 
-type fakeGit struct{ out string }
+type fakeGit struct {
+	actions    []string
+	fileStatus []string
+	pushErr    error
+}
 
-func (g fakeGit) Status(context.Context, string) (string, error) { return g.out, nil }
+func (*fakeGit) Status(context.Context, string) (string, error) { return "", nil }
+func (g *fakeGit) FileStatus(context.Context, string, string) (string, error) {
+	status := g.fileStatus[0]
+	g.fileStatus = g.fileStatus[1:]
+	return status, nil
+}
+
+func (g *fakeGit) Stage(_ context.Context, _, path string) error {
+	g.actions = append(g.actions, "stage "+path)
+	return nil
+}
+
+func (g *fakeGit) Commit(_ context.Context, _, path string) error {
+	g.actions = append(g.actions, "commit "+path)
+	return nil
+}
+
+func (g *fakeGit) Push(context.Context, string) error {
+	g.actions = append(g.actions, "push")
+	return g.pushErr
+}
 
 type rig struct {
 	svc  *Service
@@ -129,6 +160,7 @@ type rig struct {
 	ed   *fakeEditor
 	chk  *fakeChecker
 	pr   *fakePrompt
+	git  *fakeGit
 	src  string
 	errw *bytes.Buffer
 }
@@ -166,6 +198,7 @@ func newRig(t *testing.T, e registry.Entry, states ...chez.State) *rig {
 		ed:   &fakeEditor{write: "new"},
 		chk:  &fakeChecker{},
 		pr:   &fakePrompt{yes: true},
+		git:  &fakeGit{fileStatus: []string{" M source", "M  source"}},
 		src:  src,
 		errw: &bytes.Buffer{},
 	}
@@ -174,7 +207,7 @@ func newRig(t *testing.T, e registry.Entry, states ...chez.State) *rig {
 		Matrix: func(context.Context, string) ([]matrix.Entry, error) {
 			return []matrix.Entry{{OS: "linux", Role: "work", Overrides: chez.Overrides{"work": true}}}, nil
 		},
-		Tree: tree.New(fstest.MapFS{}), Editor: r.ed, Check: r.chk, Prompt: r.pr, Git: fakeGit{}, Src: src,
+		Tree: tree.New(fstest.MapFS{}), Editor: r.ed, Check: r.chk, Prompt: r.pr, Git: r.git, Src: src,
 		Out: io.Discard, Err: r.errw, Style: term.Style{},
 	}
 	return r
@@ -216,16 +249,92 @@ func TestEditDeclinedAppliesNothing(t *testing.T) {
 	}
 }
 
+func TestEditGitSettings(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		add      bool
+		commit   bool
+		push     bool
+		noEdit   bool
+		reverted bool
+		want     []string
+	}{
+		{name: "manual"},
+		{name: "stage", add: true, want: []string{"stage home/a.md"}},
+		{name: "commit", commit: true, want: []string{"stage home/a.md", "commit home/a.md"}},
+		{name: "push implies commit", push: true, want: []string{"stage home/a.md", "commit home/a.md", "push"}},
+		{name: "editor saved nothing", push: true, noEdit: true},
+		{name: "matches HEAD after staging", push: true, reverted: true, want: []string{"stage home/a.md"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "home/a.md"}, st("1"), st("2"))
+			r.svc.Src = filepath.Join(r.src, "home")
+			r.cz.config.Edit.Apply = true
+			r.cz.config.Git.AutoAdd = tt.add
+			r.cz.config.Git.AutoCommit = tt.commit
+			r.cz.config.Git.AutoPush = tt.push
+			if tt.noEdit {
+				r.ed.write = ""
+			}
+			if tt.reverted {
+				r.git.fileStatus[1] = ""
+			}
+			if err := r.svc.Run(t.Context(), "a.md"); err != nil {
+				t.Fatalf("Run() = %v", err)
+			}
+			wantTargets := []string{filepath.Join(r.cz.home, "x")}
+			if r.pr.ask != 0 || !slices.Equal(r.cz.diffed, wantTargets) || !slices.Equal(r.cz.applied, wantTargets) {
+				t.Errorf("prompt, diff and apply = %d, %v, %v, want 0 and %v for diff and apply", r.pr.ask, r.cz.diffed, r.cz.applied, wantTargets)
+			}
+			if !slices.Equal(r.git.actions, tt.want) {
+				t.Errorf("Git actions = %v, want %v", r.git.actions, tt.want)
+			}
+		})
+	}
+}
+
+func TestEditApplyFailureStopsBeforeGit(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "a.md"}, st("1"), st("2"))
+	r.cz.config.Edit.Apply = true
+	r.cz.config.Git.AutoPush = true
+	r.cz.applyErr = errors.New("apply refused")
+	if err := r.svc.Run(t.Context(), "a"); !errors.Is(err, r.cz.applyErr) {
+		t.Fatalf("Run() = %v, want %v", err, r.cz.applyErr)
+	}
+	if len(r.git.actions) != 0 {
+		t.Errorf("Git actions = %v, want none after an apply failure", r.git.actions)
+	}
+}
+
+func TestEditReportsRejectedPush(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "a.md"}, st("1"), st("2"))
+	r.cz.config.Git.AutoPush = true
+	r.git.pushErr = errors.New("protected branch")
+	err := r.svc.Run(t.Context(), "a")
+	if !errors.Is(err, r.git.pushErr) || !strings.Contains(err.Error(), "commit kept locally") {
+		t.Errorf("Run() = %v, want Git rejection and local commit notice", err)
+	}
+}
+
 func TestEditCheckFailureStopsBeforeRender(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "a.md", Check: []string{"lint"}}, st("1"))
 	r.chk.err = errors.New("bad")
+	r.cz.config.Git.AutoPush = true
 	err := r.svc.Run(t.Context(), "a")
 	if !errors.Is(err, ErrReported) {
 		t.Fatalf("Run() = %v, want ErrReported", err)
 	}
 	if r.cz.applied != nil || r.pr.ask != 0 {
 		t.Error("a failed check must not reach apply or confirm")
+	}
+	if len(r.git.actions) != 0 {
+		t.Errorf("Git actions = %v, want none after a failed check", r.git.actions)
 	}
 	if b, _ := os.ReadFile(filepath.Join(r.src, "a.md")); string(b) != "new" {
 		t.Errorf("source = %q, want the edit kept", b)

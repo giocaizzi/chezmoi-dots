@@ -180,19 +180,36 @@ func (c *Client) TargetPath(ctx context.Context) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// WorkingTree returns the root of the git repository that holds the source dir.
-func (c *Client) WorkingTree(ctx context.Context) (string, error) {
+// EditConfig contains the effective chezmoi settings used when editing source files.
+type EditConfig struct {
+	WorkingTree string `json:"workingTree"`
+	Edit        struct {
+		Apply bool `json:"apply"`
+	} `json:"edit"`
+	Git struct {
+		AutoAdd    bool `json:"autoadd"`
+		AutoCommit bool `json:"autocommit"`
+		AutoPush   bool `json:"autopush"`
+	} `json:"git"`
+}
+
+// EditConfig returns the settings from chezmoi dump-config.
+func (c *Client) EditConfig(ctx context.Context) (EditConfig, error) {
 	out, err := c.output(ctx, nil, nil, "dump-config", "--format", "json")
 	if err != nil {
-		return "", err
+		return EditConfig{}, err
 	}
-	var cfg struct {
-		WorkingTree string `json:"workingTree"`
-	}
+	var cfg EditConfig
 	if err := json.Unmarshal(out, &cfg); err != nil {
-		return "", fmt.Errorf("decode chezmoi dump-config: %w", err)
+		return EditConfig{}, fmt.Errorf("decode chezmoi dump-config: %w", err)
 	}
-	return cfg.WorkingTree, nil
+	return cfg, nil
+}
+
+// WorkingTree returns the root of the git repository that holds the source dir.
+func (c *Client) WorkingTree(ctx context.Context) (string, error) {
+	cfg, err := c.EditConfig(ctx)
+	return cfg.WorkingTree, err
 }
 
 // Status returns chezmoi status for targets (empty when they are up to date).

@@ -32,7 +32,7 @@ var ErrUsage = errors.New("usage")
 type Chezmoi interface {
 	SourcePath(ctx context.Context, target string, o chez.Overrides) (string, error)
 	TargetPath(ctx context.Context) (string, error)
-	WorkingTree(ctx context.Context) (string, error)
+	EditConfig(ctx context.Context) (chez.EditConfig, error)
 	Dump(ctx context.Context, o chez.Overrides) (chez.State, error)
 	Managed(ctx context.Context, o chez.Overrides) (map[string]string, error)
 	Cat(ctx context.Context, target string, o chez.Overrides) ([]byte, error)
@@ -59,9 +59,13 @@ type Prompter interface {
 	Pick(ctx context.Context, label string, items []string) (string, error)
 }
 
-// Git reports the uncommitted changes of a working tree.
+// Git reports source changes and publishes validated edits.
 type Git interface {
 	Status(ctx context.Context, dir string) (string, error)
+	FileStatus(ctx context.Context, dir, path string) (string, error)
+	Stage(ctx context.Context, dir, path string) error
+	Commit(ctx context.Context, dir, path string) error
+	Push(ctx context.Context, dir string) error
 }
 
 // Preview is a live view of what the edit changes on this machine, shown beside the
@@ -218,13 +222,27 @@ func (s *Service) snapshot(ctx context.Context, entries []matrix.Entry) snapshot
 }
 
 func (s *Service) editSource(ctx context.Context, e *registry.Entry, file string) error {
+	cfg, err := s.CZ.EditConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("read edit settings: %w", err)
+	}
+	path := filepath.Join(s.Src, filepath.FromSlash(file))
+	repoFile, err := sourceGitPath(cfg, path)
+	if err != nil {
+		return err
+	}
+	var sourceBefore [32]byte
+	if repoFile != "" {
+		sourceBefore, err = sum(path)
+		if err != nil {
+			return err
+		}
+	}
 	scratch, err := os.MkdirTemp("", "dots-")
 	if err != nil {
 		return fmt.Errorf("make scratch dir: %w", err)
 	}
 	defer os.RemoveAll(scratch)
-	path := filepath.Join(s.Src, filepath.FromSlash(file))
-
 	entries, err := s.Matrix(ctx, scratch)
 	if err != nil {
 		return fmt.Errorf("build the configuration matrix: %w", err)
@@ -247,7 +265,7 @@ func (s *Service) editSource(ctx context.Context, e *registry.Entry, file string
 			return err
 		}
 	}
-	if err = s.runCheck(ctx, e, edited, path); err != nil {
+	if err = s.runCheck(ctx, e, cfg.WorkingTree, edited, path); err != nil {
 		return err
 	}
 	after := s.snapshot(ctx, entries)
@@ -258,7 +276,14 @@ func (s *Service) editSource(ctx context.Context, e *registry.Entry, file string
 		fmt.Fprintf(s.Err, "%s✗ A configuration no longer renders, nothing applied.%s The source keeps the edit: run the command again to fix it (%s).\n", s.Style.R, s.Style.O, path)
 		return ErrReported
 	}
-	return s.apply(ctx, e, before, after)
+	if err = s.apply(ctx, e, before, after, cfg.Edit.Apply); err != nil {
+		return err
+	}
+	if err = s.saveSource(ctx, cfg, repoFile, path, sourceBefore); err != nil {
+		return err
+	}
+	s.reportSourceChanges(ctx, cfg.WorkingTree)
+	return nil
 }
 
 // privateCopy decrypts the source file into the scratch dir and returns the copy's path.
@@ -299,15 +324,11 @@ func (s *Service) openEditor(ctx context.Context, file, path, edited, scratch st
 }
 
 // runCheck runs the entry's check command, if it has one, on the edited file.
-func (s *Service) runCheck(ctx context.Context, e *registry.Entry, edited, path string) error {
+func (s *Service) runCheck(ctx context.Context, e *registry.Entry, wt, edited, path string) error {
 	if e == nil || len(e.Check) == 0 {
 		return nil
 	}
-	wt, err := s.CZ.WorkingTree(ctx)
-	if err != nil {
-		return fmt.Errorf("working tree: %w", err)
-	}
-	if err = s.Check.Check(ctx, wt, withFile(e.Check, edited)); err != nil {
+	if err := s.Check.Check(ctx, wt, withFile(e.Check, edited)); err != nil {
 		fmt.Fprintf(s.Err, "%s✗ Check failed, nothing applied.%s The source keeps the edit: run the command again to fix it (%s).\n", s.Style.R, s.Style.O, path)
 		return ErrReported
 	}
@@ -335,7 +356,7 @@ func (s *Service) reencrypt(ctx context.Context, edited, path string) error {
 }
 
 // apply shows this machine's changed targets and applies them on confirmation.
-func (s *Service) apply(ctx context.Context, e *registry.Entry, before, after snapshot) error {
+func (s *Service) apply(ctx context.Context, e *registry.Entry, before, after snapshot, autoApply bool) error {
 	home, err := s.CZ.TargetPath(ctx)
 	if err != nil {
 		return fmt.Errorf("target path: %w", err)
@@ -356,10 +377,9 @@ func (s *Service) apply(ctx context.Context, e *registry.Entry, before, after sn
 	}
 	if pending == "" {
 		fmt.Fprintf(s.Err, "%s✓ Targets up to date: nothing to apply.%s\n", st.G, st.O)
-	} else if err = s.offerApply(ctx, e, targets); err != nil {
-		return err
+		return nil
 	}
-	return s.reportSourceChanges(ctx)
+	return s.offerApply(ctx, e, targets, autoApply)
 }
 
 // changedTargets splits what the edit changed into target paths under home and
@@ -375,8 +395,8 @@ func changedTargets(home string, before, after chez.State) (targets, scripts []s
 	return targets, scripts
 }
 
-// offerApply shows the diff of the targets and applies them when the user agrees.
-func (s *Service) offerApply(ctx context.Context, e *registry.Entry, targets []string) error {
+// offerApply shows the diff and applies it with automatic or interactive approval.
+func (s *Service) offerApply(ctx context.Context, e *registry.Entry, targets []string, autoApply bool) error {
 	st := s.Style
 	show := targets
 	if e != nil && e.First {
@@ -385,14 +405,16 @@ func (s *Service) offerApply(ctx context.Context, e *registry.Entry, targets []s
 	if err := s.CZ.Diff(ctx, s.Out, s.Err, show...); err != nil {
 		return fmt.Errorf("diff: %w", err)
 	}
-	yes, err := s.Prompt.Confirm(st.Y+"apply now?"+st.O, false)
-	if err != nil {
-		return fmt.Errorf("confirm: %w", err)
+	if !autoApply {
+		yes, err := s.Prompt.Confirm(st.Y+"apply now?"+st.O, false)
+		if err != nil {
+			return fmt.Errorf("confirm: %w", err)
+		}
+		if !yes {
+			return nil
+		}
 	}
-	if !yes {
-		return nil
-	}
-	if err = s.CZ.Apply(ctx, s.Out, s.Err, targets...); err != nil {
+	if err := s.CZ.Apply(ctx, s.Out, s.Err, targets...); err != nil {
 		return fmt.Errorf("apply: %w", err)
 	}
 	fmt.Fprintf(s.Err, "%s✓ applied%s\n", st.G, st.O)
@@ -403,19 +425,14 @@ func (s *Service) offerApply(ctx context.Context, e *registry.Entry, targets []s
 }
 
 // reportSourceChanges tells the user the dotfiles source has uncommitted changes.
-func (s *Service) reportSourceChanges(ctx context.Context) error {
+func (s *Service) reportSourceChanges(ctx context.Context, wt string) {
 	st := s.Style
-	wt, err := s.CZ.WorkingTree(ctx)
-	if err != nil {
-		return fmt.Errorf("working tree: %w", err)
-	}
 	if changes, gitErr := s.Git.Status(ctx, wt); gitErr == nil && changes != "" {
-		fmt.Fprintf(s.Err, "%s▸ the dotfiles source changed:%s ship a PR (e.g. /ship) from %s\n", st.B, st.O, wt)
+		fmt.Fprintf(s.Err, "%s▸ uncommitted dotfiles changes in %s%s\n", st.B, wt, st.O)
 		for line := range strings.SplitSeq(changes, "\n") {
 			fmt.Fprintf(s.Err, "  %s%s%s\n", st.D, line, st.O)
 		}
 	}
-	return nil
 }
 
 // report prints, per configuration, the targets the edit changed ("same as" an

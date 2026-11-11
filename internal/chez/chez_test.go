@@ -96,6 +96,22 @@ func TestManaged(t *testing.T) {
 	}
 }
 
+func TestEditConfig(t *testing.T) {
+	t.Parallel()
+	r := &fakeRunner{stdout: `{"workingTree":"/source","edit":{"apply":true},"git":{"autoadd":true,"autocommit":true,"autopush":true}}`}
+	got, err := New(r, "chezmoi", "--config", "/config").EditConfig(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkingTree != "/source" || !got.Edit.Apply || !got.Git.AutoAdd || !got.Git.AutoCommit || !got.Git.AutoPush {
+		t.Errorf("EditConfig() = %+v, want working tree and all four settings enabled", got)
+	}
+	want := []string{"chezmoi", "--config", "/config", "dump-config", "--format", "json"}
+	if diff := cmp.Diff(want, r.calls[0]); diff != "" {
+		t.Errorf("argv (-want +got):\n%s", diff)
+	}
+}
+
 func TestStateAndChanged(t *testing.T) {
 	t.Parallel()
 	before, err := DecodeState([]byte(`{"/a":{"type":"file","contents":"1"},"/b":{"type":"file","contents":"x"},"/c":{"type":"file","contents":"y"}}`))
