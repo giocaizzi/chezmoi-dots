@@ -79,6 +79,8 @@ go install github.com/giocaizzi/chezmoi-dots/cmd/chezmoi-dots@latest
 | `dots lint` | `[flags]` | Lint registries, template syntax, and matrix rules |
 | `dots audit` | `aliases` | Audit live shell environment against alias registry |
 
+See [Apply and publish source edits](docs/README.md#apply-and-publish-source-edits) for the chezmoi settings that control apply and Git automation.
+
 ---
 
 ## License
