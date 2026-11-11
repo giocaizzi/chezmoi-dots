@@ -1,0 +1,31 @@
+chezmoi dots — Manage, verify and render dotfiles
+
+USAGE
+  chezmoi dots [command] [arguments] [options]
+
+COMMANDS
+  edit       Edit dotfiles source (default command)
+  view       Preview rendered dotfiles
+  list       List configured editable registry components
+  lint       Check registries and rendered templates
+  audit      Audit live shell configuration
+  outdated   Every tool: installed, pinned and latest versions
+  bump       Update pinned versions and checksums
+  upgrade    Run system and dotfile upgrade steps
+  version    Print version information
+  help       Show command help
+
+ARGUMENTS
+  command  Default: edit. With no selector, open the interactive picker.
+  An unrecognized first token is an edit selector, not a command.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+
+ENVIRONMENT
+  See command help for relevant environment variables.
+
+EXAMPLES
+  chezmoi dots
+  chezmoi dots help view
+  chezmoi dots view --help
