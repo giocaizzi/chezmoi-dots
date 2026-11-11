@@ -28,26 +28,38 @@ func TestRenderHelpStyles(t *testing.T) {
 			var plain, colored bytes.Buffer
 			renderHelp(&plain, node, term.Style{})
 			renderHelp(&colored, node, style)
-
-			if got, want := stripHelpANSI(colored.String()), plain.String(); got != want {
-				t.Errorf("colored help without ANSI = %q, want %q", got, want)
-			}
-			title := strings.TrimSpace("chezmoi dots " + tt.path)
-			if !strings.Contains(colored.String(), style.B+title+style.O+" — ") {
-				t.Errorf("help title is not blue: %q", colored.String())
-			}
-			for _, heading := range []string{"USAGE", "ARGUMENTS", "OPTIONS", "ENVIRONMENT", "EXAMPLES"} {
-				if !strings.Contains(colored.String(), style.B+heading+style.O) {
-					t.Errorf("%s heading is not blue: %q", heading, colored.String())
-				}
-			}
-			if len(node.children) > 0 && !strings.Contains(colored.String(), style.B+"COMMANDS"+style.O) {
-				t.Errorf("COMMANDS heading is not blue: %q", colored.String())
-			}
-			if tt.commandName != "" && !strings.Contains(colored.String(), style.M+tt.commandName) {
-				t.Errorf("command %q is not mauve: %q", tt.commandName, colored.String())
-			}
+			assertHelpStylePage(t, node, tt.path, tt.commandName, plain.String(), colored.String(), style)
 		})
+	}
+}
+
+func assertHelpStylePage(t *testing.T, node helpNode, path, commandName, plain, colored string, style term.Style) {
+	t.Helper()
+	if got, want := stripHelpANSI(colored), plain; got != want {
+		t.Errorf("colored help without ANSI = %q, want %q", got, want)
+	}
+	title := strings.TrimSpace("chezmoi dots " + path)
+	assertHelpStyle(t, colored, style.B, title, style.O+" — ")
+	assertBlueHeadings(t, colored, style, node)
+	if commandName != "" {
+		assertHelpStyle(t, colored, style.M, commandName, "")
+	}
+}
+
+func assertBlueHeadings(t *testing.T, output string, style term.Style, node helpNode) {
+	t.Helper()
+	for _, heading := range []string{"USAGE", "ARGUMENTS", "OPTIONS", "ENVIRONMENT", "EXAMPLES"} {
+		assertHelpStyle(t, output, style.B, heading, style.O)
+	}
+	if len(node.children) > 0 {
+		assertHelpStyle(t, output, style.B, "COMMANDS", style.O)
+	}
+}
+
+func assertHelpStyle(t *testing.T, output, color, text, suffix string) {
+	t.Helper()
+	if !strings.Contains(output, color+text+suffix) {
+		t.Errorf("output lacks styled text %q: %q", text, output)
 	}
 }
 
