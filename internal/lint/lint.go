@@ -49,7 +49,7 @@ func (l Linter) Run(ctx context.Context, name string) ([]finding.Finding, error)
 	case "packages":
 		return l.packages(ctx)
 	case "matrix":
-		return l.matrix(ctx)
+		return l.matrix()
 	case "templates":
 		return l.templates(ctx)
 	}
@@ -122,9 +122,9 @@ func (l Linter) packages(ctx context.Context) ([]finding.Finding, error) {
 	return pkgreg.Validate(data), nil
 }
 
-// matrix checks the config template against what the matrix seeds and the harness
-// targets: they are written apart and must agree.
-func (l Linter) matrix(ctx context.Context) ([]finding.Finding, error) {
+// matrix checks the config template's [data] keys against what the matrix seeds:
+// they are written apart and must agree.
+func (l Linter) matrix() ([]finding.Finding, error) {
 	tmpl, err := os.ReadFile(filepath.Join(l.Src, ".chezmoi.toml.tmpl"))
 	if err != nil {
 		return nil, fmt.Errorf("read config template: %w", err)
@@ -138,26 +138,6 @@ func (l Linter) matrix(ctx context.Context) ([]finding.Finding, error) {
 	if got := matrix.DataKeys(tmpl); !slices.Equal(got, seeded) {
 		out = append(out, finding.New(".chezmoi.toml.tmpl", "[data] keys %v differ from the keys the configuration matrix seeds %v (internal/matrix Seed)", got, seeded))
 	}
-	data, err := l.Iso.Data(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	choices, err := matrix.Harnesses(tmpl)
-	if err != nil {
-		return nil, err
-	}
-	targets, _ := data["harnessTargets"].(map[string]any)
-	var owned []string
-	for h := range targets {
-		owned = append(owned, h)
-	}
-	owned = append(owned, "copilot") // its targets are shared, so .chezmoiignore spells them out
-	slices.Sort(owned)
-	want := slices.Clone(choices)
-	slices.Sort(want)
-	if !slices.Equal(want, owned) {
-		out = append(out, finding.New(".chezmoi.toml.tmpl", "harness choices %v differ from [harnessTargets] plus copilot %v", want, owned))
-	}
 	return out, nil
 }
 
@@ -169,11 +149,14 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Also a single harness, which gates the harness scripts differently.
-	for _, e := range slices.Clone(entries) {
-		if e.Role != "light" {
-			e.Overrides = e.Overrides.Clone(chez.Overrides{"harnesses": []string{"opencode"}})
-			entries = append(entries, e)
+	// Also a single harness (the first the config template offers), which gates the
+	// harness scripts differently.
+	if first, ok := l.firstHarness(); ok {
+		for _, e := range slices.Clone(entries) {
+			if e.Role != "light" {
+				e.Overrides = e.Overrides.Clone(chez.Overrides{"harnesses": []string{first}})
+				entries = append(entries, e)
+			}
 		}
 	}
 	files, err := l.templateFiles()
@@ -205,8 +188,22 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 	return out, nil
 }
 
+// firstHarness returns the first harness choice of the config template; ok is false
+// when the template offers none.
+func (l Linter) firstHarness() (string, bool) {
+	tmpl, err := os.ReadFile(filepath.Join(l.Src, ".chezmoi.toml.tmpl"))
+	if err != nil {
+		return "", false
+	}
+	choices, err := matrix.Harnesses(tmpl)
+	if err != nil || len(choices) == 0 {
+		return "", false
+	}
+	return choices[0], true
+}
+
 // templateFiles lists the templates worth rendering whole: every script, the alias
-// files and optional settings templates if present. Partials need arguments and the secrets files read the
+// files if present. Partials need arguments and the secrets files read the
 // Secrets Manager, so they are checked through the templates that use them.
 func (l Linter) templateFiles() ([]string, error) {
 	var out []string
@@ -214,10 +211,6 @@ func (l Linter) templateFiles() ([]string, error) {
 		"dot_config/shell/aliases.sh.tmpl",
 		"dot_config/shell/omz-aliases.zsh.tmpl",
 		"dot_config/powershell/aliases.ps1.tmpl",
-		".chezmoitemplates/claude-settings.json",
-		".chezmoitemplates/copilot-settings.json",
-		".chezmoitemplates/antigravity-settings.json",
-		"dot_codex/modify_private_config.toml",
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(filepath.Join(l.Src, filepath.FromSlash(c))); err == nil {
