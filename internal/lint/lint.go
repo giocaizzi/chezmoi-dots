@@ -195,8 +195,8 @@ func (l Linter) firstHarness() (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	choices, err := matrix.Harnesses(tmpl)
-	if err != nil || len(choices) == 0 {
+	choices := matrix.Harnesses(tmpl)
+	if len(choices) == 0 {
 		return "", false
 	}
 	return choices[0], true

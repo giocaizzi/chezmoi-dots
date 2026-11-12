@@ -6,7 +6,6 @@ package matrix
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -93,13 +92,14 @@ type Entry struct {
 
 var harnessList = regexp.MustCompile(`\$all\s*:=\s*list((?:\s+"[a-z]+")+)`)
 
-// Harnesses reads the harness choices offered by the config template.
-func Harnesses(tmpl []byte) ([]string, error) {
+// Harnesses reads the harness choices offered by the config template: none when it
+// has no `$all := list "…"` harness list.
+func Harnesses(tmpl []byte) []string {
 	m := harnessList.FindSubmatch(tmpl)
 	if m == nil {
-		return nil, errors.New(`config template: no ` + "`$all := list \"…\"`" + ` harness list`)
+		return nil
 	}
-	return strings.Fields(strings.ReplaceAll(string(m[1]), `"`, "")), nil
+	return strings.Fields(strings.ReplaceAll(string(m[1]), `"`, ""))
 }
 
 // DataKeys lists the keys of the template's [data] table.
@@ -183,10 +183,7 @@ func Build(ctx context.Context, cz *chez.Client, src, scratch string) ([]Entry, 
 	if err != nil {
 		return nil, fmt.Errorf("read config template: %w", err)
 	}
-	harnesses, err := Harnesses(tmpl)
-	if err != nil {
-		return nil, err
-	}
+	harnesses := Harnesses(tmpl)
 	local, err := cz.Data(ctx, nil)
 	if err != nil {
 		return nil, err

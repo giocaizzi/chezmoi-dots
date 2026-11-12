@@ -43,15 +43,21 @@ func TestAll(t *testing.T) {
 
 func TestHarnesses(t *testing.T) {
 	t.Parallel()
-	got, err := Harnesses([]byte(`{{- $all := list "claude" "copilot" "vscode" -}}`))
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name string
+		tmpl string
+		want []string
+	}{
+		{name: "list", tmpl: `{{- $all := list "claude" "copilot" "vscode" -}}`, want: []string{"claude", "copilot", "vscode"}},
+		{name: "no list", tmpl: "nothing", want: nil},
 	}
-	if diff := cmp.Diff([]string{"claude", "copilot", "vscode"}, got); diff != "" {
-		t.Errorf("Harnesses() (-want +got):\n%s", diff)
-	}
-	if _, err := Harnesses([]byte("nothing")); err == nil {
-		t.Error("Harnesses() without a list: want an error")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(tt.want, Harnesses([]byte(tt.tmpl))); diff != "" {
+				t.Errorf("Harnesses() (-want +got):\n%s", diff)
+			}
+		})
 	}
 }
 
