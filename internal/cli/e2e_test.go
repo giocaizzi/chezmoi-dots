@@ -304,3 +304,17 @@ func TestLintRegistryOnTheFixture(t *testing.T) {
 		t.Errorf("lint registry = %v\n%s", err, stderr)
 	}
 }
+
+// A config template that offers no `$all := list` harness list is a repo without
+// harness choices: the matrix still builds and the templates lint runs.
+func TestLintTemplatesWithoutAHarnessList(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	tmpl := strings.Replace(configTemplate, `{{- $all := list "claude" "vscode" -}}`, `{{- $all := list -}}`, 1)
+	if err := os.WriteFile(filepath.Join(e.src, ".chezmoi.toml.tmpl"), []byte(tmpl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, err := e.run(t, "", "lint", "templates"); err != nil {
+		t.Errorf("lint templates = %v\n%s", err, stderr)
+	}
+}
