@@ -25,7 +25,7 @@ Declarative registry-driven editing, package inventory drift detection, automate
 
 - **Registry-Driven Editing (`dots <target>`)**: Open dotfiles by logical alias (`dots zsh`, `dots git`, `dots ssh/config`) with pre-save linters, atomic temp files, and post-save formatters.
 - **Zero-Config Fallback**: Works on any `chezmoi managed` repository without configuration—fuzzy pick and edit any managed target directly.
-- **Inventory & Drift Audit (`dots outdated`, `dots bump`)**: Query Homebrew, Pacman, Apt, and GitHub Releases to detect version drift against your pins. Update pins with comment-preserving text edits.
+- **Inventory & Drift Audit (`dots outdated`, `dots bump`)**: Query Homebrew, Apt, winget, uv, npm, and GitHub Releases to detect version drift against your pins. Update pins with comment-preserving text edits.
 - **Live Preview**: Editing can render live updates to a side pane using tmux or Windows Terminal; `live` is the internal pane command.
 - **Template Composition (`dots view`)**: Inspect a target's composition tree and rendered content, including previews across OS/role configurations.
 - **Template Linting (`dots lint`)**: Verify template syntax, detect unrendered delimiters, and validate cross-OS matrix configurations.
