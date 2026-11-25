@@ -379,30 +379,67 @@ chezmoi dots pkg bump chezmoi-dots
 ```text
 chezmoi dots pkg add <name> [--brew[=<formula>]] [--cask <name>] [--apt[=<package>]]
                      [--winget <id>] [--uv[=<spec>]] [--npm[=<spec>]]
-                     [--roles <roles>] [--requires <answer>] [--dry-run]
+                     [--roles <roles>] [--requires <answer>] [--yes] [--dry-run]
 chezmoi dots pkg add <name> --release --version <v> --url <template>
                      --target <os/arch>=<name>... [--roles <roles>] [--requires <answer>] [--dry-run]
+chezmoi dots pkg add <name> --github <owner/repo> [--roles <roles>] [--requires <answer>] [--yes] [--dry-run]
 ```
 
-Append one new entry to `.chezmoidata/packages.toml` in the chezmoi source dir.
-`<name>` matches `[A-Za-z0-9_-]+`. The entry is added as text at the end of the
-file, after one blank line unless the file already ends with one; the rest of the
-file (comments, order, CRLF or LF line endings) is kept byte for byte, and the new
-entry uses the file's line ending. A missing file (and `.chezmoidata/`) is created
-with mode 0644. The file is written atomically: the new text goes to a temp file
-beside it, which is then renamed over it. A package or release with that name is
-never changed: it exits 1 with
+Add one new entry to `.chezmoidata/packages.toml` in the chezmoi source dir, or the
+keys an existing package lacks. `<name>` matches `[A-Za-z0-9_-]+`. A new entry is
+added as text at the end of the file, after one blank line unless the file already
+ends with one; the rest of the file (comments, order, CRLF or LF line endings) is
+kept byte for byte, and the new entry uses the file's line ending. A missing file
+(and `.chezmoidata/`) is created with mode 0644. The file is written atomically: the
+new text goes to a temp file beside it, which is then renamed over it. A release with
+that name is never changed, and neither is a package in release mode: it exits 1 with
 `<kind> <name> already exists; change it with chezmoi dots edit or move a release with chezmoi dots pkg bump`.
 
-**Package mode** (default) needs at least one install source, written as a
-`[package.<name>]` table with its keys in this order: `brew`, `cask`, `apt`,
-`winget`, `uv`, `npm`, `roles`, `requires`.
+**Package mode** (default) writes a `[package.<name>]` table with its keys in this
+order: `brew`, `cask`, `apt`, `winget`, `uv`, `npm`, `roles`, `requires`. The install
+sources come from flags or, when no source flag is given, from detection.
 
 - `--brew`, `--apt`, `--uv`, `--npm`: the value is optional. Bare (`--brew`) it is
   `<name>`; `--brew=wget` installs `wget` instead. For `--uv` and `--npm` the value
   is the manager's spec, for example `--npm=typescript@5`. The value must be
   attached with `=`; `--brew wget` reads `wget` as the entry name.
 - `--cask <name>`, `--winget <id>`: the value is required.
+
+**Detection** runs only when no source flag (`--brew`, `--cask`, `--apt`, `--winget`,
+`--uv`, `--npm`) is given: any of them turns it off. It asks the package managers on
+this machine what they know of `<name>`: `brew` (formula, else cask) on macOS, `apt`
+on Linux, `winget` on Windows, and `uv` and `npm` everywhere. It reads only this
+machine's installed packages and the managers' own local indexes, never a public
+index, and never another OS: the keys of the other OSes come only from flags or from
+running `pkg add` on that OS. A manager that is not on `PATH` is not asked. The
+proposal goes to stderr, one line per source, `  <key> = "<id>"  (installed)` or
+`(available)`, and `  nothing found by <managers>` for the managers that found
+nothing.
+
+- On a terminal each source is confirmed: `<key> = "<id>"? [Y/n/e]` (Enter or `y`
+  keeps it, `n` drops it, `e` asks for another id; an empty id keeps the detected
+  one).
+- Without a terminal the sources are accepted only with `--yes`; otherwise it exits 2
+  with `detected sources need confirmation; pass --yes or set them with flags`.
+- Nothing found, or every source declined, exits 2 and names the managers asked.
+- `--dry-run` still detects (it only reads local state) and needs `--yes` off a
+  terminal as a write does.
+
+**Existing package.** When `<name>` is already a `[package.<name>]` table, `pkg add`
+adds the keys it lacks and nothing else. A key the entry already has is left
+unchanged and listed on stderr (`<key> already set; change it with chezmoi dots edit`).
+The new key lines go after the table's last key line, before the blank lines and
+comments that precede the next table header, in the file's line ending. If nothing is
+left to add it exits 1 with
+`package <name> already has these keys; change it with chezmoi dots edit`; a package
+that is not a `[package.<name>]` table in this file (an inline table, or defined in
+another file) exits 1 and is not changed. This is how another OS fills in its key: run
+`pkg add <name>` there. It prints `updated package <name>: <keys>`.
+
+**Notes.** After a package entry is written (or printed by `--dry-run`), one line per
+OS none of whose keys the entry has goes to stdout: `not set for <os>: <keys>; pass
+--<key> or run chezmoi dots pkg add <name> on <os>`. The keys are `brew` and `cask`
+for darwin, `apt` for linux and `winget` for windows; `uv` and `npm` count for none.
 
 **Release mode** (`--release`) pins a release binary and needs `--version`, `--url`
 (a template that contains `{version}`, and optionally `{target}`) and one or more
@@ -413,34 +450,70 @@ never changed: it exits 1 with
 [pkg bump](#pkg-bump), it downloads the asset of every target to compute its
 SHA-256, so it needs network access; if a download fails nothing is written.
 
+**GitHub mode** (`--github <owner/repo>`) implies release mode and derives the entry
+from the latest GitHub release of the repository; it does not combine with
+`--version`, `--url`, `--target` or a package source flag (usage errors).
+`GH_TOKEN` or `GITHUB_TOKEN`, when set, is sent as a bearer token to raise the API
+rate limit; neither is required. The assets are read by name only:
+
+- Checksums, signatures, SBOMs and installers (`.sha256`, `.sig`, `.deb`, `.dmg`,
+  `.msi`, `checksums`, ...) are left out, as are assets with no recognizable OS
+  (`darwin`/`macos`/`osx`, `linux`, `windows`/`win`) or arch (`amd64`/`x86_64`/`x64`,
+  `arm64`/`aarch64`); other arches (`386`, `armv7`, ...) are left out. A darwin
+  `universal` asset with no arch counts for both darwin arches unless an
+  arch-specific darwin asset exists.
+- Per os/arch archives (`.tar.gz`, `.tgz`, `.tar.xz`, `.zip`) win over bare binaries,
+  `.tar.gz` wins over `.zip` on darwin and linux and `.zip` over `.tar.gz` on
+  windows. Two equal candidates are reported as ambiguous and both are left out.
+- The chosen assets must be all archives (`type = "archive-file"`, with `path` the
+  repository name) or all bare binaries (`type = "file"`); a mix is an error. `exe =
+  true` is written when a windows target is mapped.
+- The release version (the tag without a leading `v`) becomes `{version}` in the URL;
+  the part of the names that differs per platform becomes `{target}` and each
+  target's value.
+
+The proposal goes to stderr: `version`, `url`, `type`, `path`, `exe`, each target
+and its value, then `left out: ...` and `ambiguous: ...`. On a terminal it is
+confirmed with `Add this release? [y/N]`; without one it needs `--yes` (otherwise
+exit 2). The entry has the keys `version`, `url`, `type`, `path`, `exe`, `roles`,
+`requires`, then the target and sha256 tables; the checksums are computed as in
+release mode, so it downloads every target's archive.
+
 `--roles` takes a comma list of `personal`, `work`, `light` and writes
 `roles = [...]`; `--requires <answer>` writes `requires = "<answer>"`. Both work
-in either mode. Package source flags with `--release`, release flags
-(`--version`, `--url`, `--target`) without it, a missing source, version, url or
-target, a bad name, role, target or url, and a name other than exactly one are
+in every mode. Package source flags with `--release`, release flags
+(`--version`, `--url`, `--target`) without it, a missing version, url or target in
+release mode, a bad name, role, target or url, and a name other than exactly one are
 usage errors (exit 2).
 
-`--dry-run` (false) prints the entry to stdout and changes nothing; in release mode
-it downloads nothing and ends the entry with the comment
-`# sha256 computed when written` where the checksums go. It makes no git changes.
+`--dry-run` (false) prints the entry to stdout and changes nothing; for an existing
+package it prints the key lines it would add. In release and GitHub mode it downloads
+no archive and ends the entry with the comment `# sha256 computed when written`
+where the checksums go (`--github` still reads the GitHub API). It makes no git
+changes.
 
 After the write, the whole package registry is validated as in
 `lint packages`. Findings are printed to stderr (`✗ packages`, the findings, and
 `<name> was written to <file>; fix it (chezmoi dots lint packages)`) and exit 1; the
-entry is kept and git is not touched. Otherwise it prints `added package <name>` or
-`added release <name>`, and follows the same git settings as [add](#add) for a
-managed file: with `git.autoAdd`, `git.autoCommit` or `git.autoPush` it stages,
-commits and pushes only `.chezmoidata/packages.toml` (a push failure keeps the
-commit and exits 1). It never installs anything; run `chezmoi apply` to install.
+entry is kept and git is not touched. Otherwise it prints `added package <name>`,
+`updated package <name>: <keys>` or `added release <name>`, and follows the same git
+settings as [add](#add) for a managed file: with `git.autoAdd`, `git.autoCommit` or
+`git.autoPush` it stages, commits and pushes only `.chezmoidata/packages.toml` (a push
+failure keeps the commit and exits 1). It never installs anything; run
+`chezmoi apply` to install.
 
-Environment: shared chezmoi and output settings.
+Environment: shared chezmoi and output settings; `GH_TOKEN` / `GITHUB_TOKEN` for
+`--github`.
 
 ```sh
 chezmoi dots pkg add wget --brew --apt
+chezmoi dots pkg add wget            # ask this machine's package managers
+chezmoi dots pkg add wget --yes      # accept what they find, no prompt
 chezmoi dots pkg add example-app --cask example-app --roles personal,work
 chezmoi dots pkg add example-tool --release --version 1.2.3 \
   --url 'https://example.com/{version}/tool-{target}.tar.gz' \
   --target linux/amd64=linux-x86_64 --target darwin/arm64=macos-arm --dry-run
+chezmoi dots pkg add example-tool --github octocat/example-tool --dry-run
 ```
 
 ## version

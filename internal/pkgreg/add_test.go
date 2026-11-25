@@ -104,6 +104,72 @@ func TestKind(t *testing.T) {
 	}
 }
 
+func TestReleaseEntryOptionalKeys(t *testing.T) {
+	t.Parallel()
+	e := pkgreg.ReleaseEntry{
+		Name: "example-tool", Version: "1.2.3", URL: "https://example.com/{version}/tool-{target}.zip",
+		Type: "archive-file", Path: "example-tool", Exe: true, Roles: []string{"work"}, Requires: "gui",
+		Targets: map[string]string{"windows/amd64": "win"}, Sums: map[string]string{"windows/amd64": "abc"},
+	}
+	want := "[release.example-tool]\nversion = \"1.2.3\"\nurl = \"https://example.com/{version}/tool-{target}.zip\"\n" +
+		"type = \"archive-file\"\npath = \"example-tool\"\nexe = true\nroles = [\"work\"]\nrequires = \"gui\"\n\n" +
+		"[release.example-tool.target]\n\"windows/amd64\" = \"win\"\n\n[release.example-tool.sha256]\n\"windows/amd64\" = \"abc\"\n"
+	if diff := cmp.Diff(want, e.Text()); diff != "" {
+		t.Errorf("Text() (-want +got):\n%s", diff)
+	}
+}
+
+func TestInsertKeys(t *testing.T) {
+	t.Parallel()
+	add := []string{`apt = "wget"`}
+	tests := []struct {
+		name, text, want string
+		ok               bool
+	}{
+		{
+			"after the last key, before the next table", "[package.wget]\nbrew = \"wget\"\n\n[package.other]\nbrew = \"o\"\n",
+			"[package.wget]\nbrew = \"wget\"\napt = \"wget\"\n\n[package.other]\nbrew = \"o\"\n", true,
+		},
+		{
+			"comments before the next header stay after", "[package.wget]\nbrew = \"wget\" # keep\n\n# about other\n[package.other]\n",
+			"[package.wget]\nbrew = \"wget\" # keep\napt = \"wget\"\n\n# about other\n[package.other]\n", true,
+		},
+		{"comment inside the table stays", "[package.wget]\n# note\nbrew = \"wget\"\n# tail\n", "[package.wget]\n# note\nbrew = \"wget\"\napt = \"wget\"\n# tail\n", true},
+		{"crlf", "[package.wget]\r\nbrew = \"wget\"\r\n\r\n[package.o]\r\n", "[package.wget]\r\nbrew = \"wget\"\r\napt = \"wget\"\r\n\r\n[package.o]\r\n", true},
+		{"entry at EOF without a newline", "[package.wget]\nbrew = \"wget\"", "[package.wget]\nbrew = \"wget\"\napt = \"wget\"\n", true},
+		{"header only", "[package.wget]\n", "[package.wget]\napt = \"wget\"\n", true},
+		{"header with a comment and quotes", "[ package . \"wget\" ] # x\nbrew = \"w\"\n", "[ package . \"wget\" ] # x\nbrew = \"w\"\napt = \"wget\"\n", true},
+		{
+			"multi-line array", "[package.wget]\nroles = [\n  \"work\",\n]\n[package.wget.sub]\nk = 1\n",
+			"[package.wget]\nroles = [\n  \"work\",\n]\napt = \"wget\"\n[package.wget.sub]\nk = 1\n", true,
+		},
+		{"inline table is not extended", "[package]\nwget = { brew = \"wget\" }\n", "[package]\nwget = { brew = \"wget\" }\n", false},
+		{"other name with the same prefix", "[package.wget2]\nbrew = \"w\"\n", "[package.wget2]\nbrew = \"w\"\n", false},
+		{"array of tables is not a package table", "[[package.wget]]\nbrew = \"w\"\n", "[[package.wget]]\nbrew = \"w\"\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, ok := pkgreg.InsertKeys(tt.text, "wget", add)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("InsertKeys (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestPackageEntryLines(t *testing.T) {
+	t.Parallel()
+	e := pkgreg.PackageEntry{Name: "x", Brew: "b", Roles: []string{"work"}}
+	want := []pkgreg.Line{{Key: "brew", Text: `brew = "b"`}, {Key: "roles", Text: `roles = ["work"]`}}
+	if diff := cmp.Diff(want, e.Lines()); diff != "" {
+		t.Errorf("Lines() (-want +got):\n%s", diff)
+	}
+}
+
 func TestValidPlatformAndRole(t *testing.T) {
 	t.Parallel()
 	for p, want := range map[string]bool{"linux/amd64": true, "windows/arm64": true, "linux": false, "freebsd/amd64": false, "linux/386": false} {

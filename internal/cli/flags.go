@@ -39,7 +39,9 @@ func newFlags(name string) *flag.FlagSet {
 		fs.String("version", "", "release `version` to pin")
 		fs.String("url", "", "release download `template` with {version} (and {target})")
 		fs.Var(new(stringList), "target", "repeatable release `os/arch=name` target")
-		fs.Bool("dry-run", false, "print the entry, write nothing and download nothing")
+		fs.String("github", "", "add a release from the latest GitHub release of `owner/repo`")
+		fs.Bool("yes", false, "accept the detected sources or the GitHub proposal without asking")
+		fs.Bool("dry-run", false, "print the entry, write nothing and download no archive")
 	case cmdUpgrade:
 		fs.Bool("dry-run", false, "show upgrade commands without executing upgrade steps")
 	case cmdLive:

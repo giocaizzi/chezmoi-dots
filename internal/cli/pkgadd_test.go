@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -31,12 +32,19 @@ type pkgAddRunner struct {
 	calls int
 	cfg   string
 	git   [][]string
+	// probes answers a detection command by its program ("brew", "uv", ...); probed records them.
+	probes map[string]string
+	probed [][]string
 }
 
 func (r *pkgAddRunner) Run(_ context.Context, c chez.Cmd) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {
+	case len(c.Args) > 0 && r.probes[c.Args[0]] != "":
+		r.probed = append(r.probed, slices.Clone(c.Args))
+		_, err := c.Stdout.Write([]byte(r.probes[c.Args[0]]))
+		return err
 	case len(c.Args) > 0 && c.Args[0] == "git":
 		r.git = append(r.git, slices.Clone(c.Args))
 		return nil
@@ -58,6 +66,10 @@ type pkgAddEnv struct {
 	out, errw bytes.Buffer
 	fetch     *archiveFetcher
 	http      http.RoundTripper
+	goos      string   // default: the host's
+	managers  []string // package managers on PATH
+	stdin     string
+	tty       bool
 }
 
 const (
@@ -84,6 +96,24 @@ func newPkgAddEnv(t *testing.T, text string, datas ...string) *pkgAddEnv {
 	return e
 }
 
+func (e *pkgAddEnv) hostOS() string {
+	if e.goos != "" {
+		return e.goos
+	}
+	return runtime.GOOS
+}
+
+// withoutNotes drops the "not set for <os>" lines, which depend on the host OS.
+func withoutNotes(out string) string {
+	var kept []string
+	for l := range strings.SplitAfterSeq(out, "\n") {
+		if !strings.HasPrefix(l, "not set for ") {
+			kept = append(kept, l)
+		}
+	}
+	return strings.Join(kept, "")
+}
+
 func (e *pkgAddEnv) run(t *testing.T, args ...string) error {
 	t.Helper()
 	d := cli.Deps{
@@ -96,9 +126,15 @@ func (e *pkgAddEnv) run(t *testing.T, args ...string) error {
 			}
 			return ""
 		},
+		Stdin:  strings.NewReader(e.stdin),
 		Stdout: &e.out, Stderr: &e.errw, Runner: e.runner, HTTP: &http.Client{Transport: e.http},
-		LookPath: func(string) (string, error) { return "", errors.New("not found") },
-		Home:     t.TempDir(), GOOS: runtime.GOOS,
+		LookPath: func(n string) (string, error) {
+			if slices.Contains(e.managers, n) {
+				return n, nil
+			}
+			return "", errors.New("not found")
+		},
+		Home: t.TempDir(), GOOS: e.hostOS(), Interactive: func() bool { return e.tty },
 	}
 	return cli.Run(t.Context(), d, append([]string{"pkg", "add"}, args...))
 }
@@ -137,7 +173,7 @@ func TestPkgAddWritesPackage(t *testing.T) {
 			if diff := cmp.Diff(tt.want, e.text(t)); diff != "" {
 				t.Errorf("packages.toml (-want +got):\n%s", diff)
 			}
-			if got := e.out.String(); got != "added package wget\n" {
+			if got := withoutNotes(e.out.String()); got != "added package wget\n" {
 				t.Errorf("stdout = %q", got)
 			}
 			if e.runner.calls != 2 {
@@ -194,7 +230,7 @@ func TestPkgAddFlagForms(t *testing.T) {
 			if err := e.run(t, append(tt.args, "--dry-run")...); err != nil {
 				t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
 			}
-			if diff := cmp.Diff(tt.want, e.out.String()); diff != "" {
+			if diff := cmp.Diff(tt.want, withoutNotes(e.out.String())); diff != "" {
 				t.Errorf("entry (-want +got):\n%s", diff)
 			}
 			if got := e.text(t); got != pkgAddOldText {
@@ -218,7 +254,6 @@ func TestPkgAddUsageErrors(t *testing.T) {
 		{"two names", []string{"a", "b", "--brew"}},
 		{"bad name", []string{"a b", "--brew"}},
 		{"name with a dot", []string{"a.b", "--brew"}},
-		{"no source", []string{"wget"}},
 		{"bad role", []string{"wget", "--brew", "--roles", "personal,admin"}},
 		{"empty role", []string{"wget", "--brew", "--roles", ""}},
 		{"empty requires", []string{"wget", "--brew", "--requires", ""}},
@@ -265,7 +300,12 @@ func TestPkgAddExistingName(t *testing.T) {
 		name, data, want string
 		args             []string
 	}{
-		{"package", `{"package":{"wget":{"brew":"wget"}}}`, "package wget already exists", []string{"wget", "--brew"}},
+		{
+			"package in release mode", `{"package":{"wget":{"brew":"wget"}}}`, "package wget already exists",
+			[]string{"wget", "--release", "--version", "1", "--url", "https://example.com/{version}/x", "--target", "linux/amd64=x"},
+		},
+		{"package in github mode", `{"package":{"wget":{"brew":"wget"}}}`, "package wget already exists", []string{"wget", "--github", "octocat/wget"}},
+		{"package with nothing new", `{"package":{"wget":{"brew":"wget"}}}`, "package wget already has these keys; change it with chezmoi dots edit", []string{"wget", "--brew"}},
 		{"release", `{"release":{"wget":{"version":"1"}}}`, "release wget already exists", []string{"wget", "--brew"}},
 		{
 			"release in release mode", `{"release":{"wget":{"version":"1"}}}`, "release wget already exists; change it with chezmoi dots edit or move a release with chezmoi dots pkg bump",
@@ -417,6 +457,487 @@ func TestPkgAddGit(t *testing.T) {
 				t.Errorf("git subcommands (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+const brewWgetJSON = `{"formulae":[{"full_name":"wget","installed":[]}],"casks":[]}`
+
+// detectEnv is a darwin machine with brew and uv, where brew knows wget.
+func detectEnv(t *testing.T, text string, datas ...string) *pkgAddEnv {
+	t.Helper()
+	e := newPkgAddEnv(t, text, datas...)
+	e.goos, e.managers = "darwin", []string{"brew", "uv"}
+	e.runner.probes = map[string]string{"brew": brewWgetJSON}
+	return e
+}
+
+func TestPkgAddFlagsDisableDetection(t *testing.T) {
+	t.Parallel()
+	e := detectEnv(t, pkgAddOldText, `{}`)
+	if err := e.run(t, "wget", "--apt", "--dry-run"); err != nil {
+		t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
+	}
+	if len(e.runner.probed) != 0 {
+		t.Errorf("detection ran despite a source flag: %v", e.runner.probed)
+	}
+	if got := withoutNotes(e.out.String()); got != "[package.wget]\napt = \"wget\"\n" {
+		t.Errorf("entry = %q", got)
+	}
+}
+
+func TestPkgAddDetect(t *testing.T) { //nolint:gocognit // table test with two outcome checks
+	t.Parallel()
+	const wantEntry = "[package.wget]\nbrew = \"wget\"\n"
+	tests := []struct {
+		name      string
+		args      []string
+		stdin     string
+		tty       bool
+		managers  []string
+		probes    map[string]string
+		wantEntry string // the entry written or printed; "" for a failure
+		wantUsage string // a message of the ErrUsage failure
+	}{
+		{name: "tty accepts with enter", stdin: "\n", tty: true, wantEntry: wantEntry},
+		{name: "tty accepts with y", stdin: "y\n", tty: true, wantEntry: wantEntry},
+		{name: "tty asks again on a stray answer", stdin: "what\nY\n", tty: true, wantEntry: wantEntry},
+		{name: "tty edits the id", stdin: "e\nwget2\n", tty: true, wantEntry: "[package.wget]\nbrew = \"wget2\"\n"},
+		{name: "tty edit with an empty id keeps it", stdin: "e\n\n", tty: true, wantEntry: wantEntry},
+		{name: "tty declines everything", stdin: "n\n", tty: true, wantUsage: "no detected source was confirmed"},
+		{name: "no tty without --yes", wantUsage: "detected sources need confirmation; pass --yes or set them with flags"},
+		{name: "no tty with --yes", args: []string{"--yes"}, wantEntry: wantEntry},
+		{name: "tty with --yes does not ask", args: []string{"--yes"}, tty: true, wantEntry: wantEntry},
+		{name: "dry run needs --yes off a tty", args: []string{"--dry-run"}, wantUsage: "detected sources need confirmation"},
+		{name: "dry run with --yes prints", args: []string{"--dry-run", "--yes"}, wantEntry: wantEntry},
+		{
+			name: "roles with a detected source", args: []string{"--yes", "--roles", "work"},
+			wantEntry: "[package.wget]\nbrew = \"wget\"\nroles = [\"work\"]\n",
+		},
+		{name: "nothing found", probes: map[string]string{"brew": `{"formulae":[],"casks":[]}`}, wantUsage: "nothing found for wget by brew, uv"},
+		{name: "no manager on this machine", managers: []string{"none"}, wantUsage: "nothing found for wget by any package manager on this machine"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := detectEnv(t, pkgAddOldText, `{}`, `{"package":{"wget":{"brew":"wget"}}}`)
+			e.stdin, e.tty = tt.stdin, tt.tty
+			if tt.managers != nil {
+				e.managers = tt.managers
+			}
+			if tt.probes != nil {
+				e.runner.probes = tt.probes
+			}
+			dry := slices.Contains(tt.args, "--dry-run")
+			err := e.run(t, append([]string{"wget"}, tt.args...)...)
+			if tt.wantUsage != "" {
+				if !errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), tt.wantUsage) {
+					t.Fatalf("pkg add = %v, want a usage error containing %q", err, tt.wantUsage)
+				}
+				if got := e.text(t); got != pkgAddOldText {
+					t.Errorf("packages.toml changed:\n%s", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
+			}
+			if !strings.Contains(e.errw.String(), "  brew = \"wget\"  (available)\n") || !strings.Contains(e.errw.String(), "  nothing found by uv\n") {
+				t.Errorf("stderr lacks the proposal:\n%s", e.errw.String())
+			}
+			if dry {
+				if got := withoutNotes(e.out.String()); got != tt.wantEntry {
+					t.Errorf("printed entry = %q, want %q", got, tt.wantEntry)
+				}
+				if got := e.text(t); got != pkgAddOldText {
+					t.Errorf("a dry run changed packages.toml:\n%s", got)
+				}
+				return
+			}
+			if diff := cmp.Diff(pkgAddOldText+"\n"+tt.wantEntry, e.text(t)); diff != "" {
+				t.Errorf("packages.toml (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestPkgAddOSNotes(t *testing.T) {
+	t.Parallel()
+	const (
+		darwin  = "not set for darwin: brew, cask; pass --brew/--cask or run chezmoi dots pkg add x on darwin\n"
+		linux   = "not set for linux: apt; pass --apt or run chezmoi dots pkg add x on linux\n"
+		windows = "not set for windows: winget; pass --winget or run chezmoi dots pkg add x on windows\n"
+	)
+	tests := []struct {
+		name string
+		flag []string
+		want string
+	}{
+		{"brew set", []string{"--brew"}, linux + windows},
+		{"cask set", []string{"--cask", "c"}, linux + windows},
+		{"apt set", []string{"--apt"}, darwin + windows},
+		{"winget set", []string{"--winget", "W"}, darwin + linux},
+		{"everywhere only", []string{"--uv", "--npm"}, darwin + linux + windows},
+		{"all set", []string{"--brew", "--apt", "--winget", "W"}, ""},
+	}
+	for _, goos := range []string{"darwin", "linux", "windows"} {
+		for _, tt := range tests {
+			t.Run(goos+" "+tt.name, func(t *testing.T) {
+				t.Parallel()
+				e := newPkgAddEnv(t, pkgAddOldText, `{}`)
+				e.goos = goos
+				if err := e.run(t, append([]string{"x", "--dry-run"}, tt.flag...)...); err != nil {
+					t.Fatalf("pkg add = %v", err)
+				}
+				var notes strings.Builder
+				for l := range strings.SplitAfterSeq(e.out.String(), "\n") {
+					if strings.HasPrefix(l, "not set for ") {
+						notes.WriteString(l)
+					}
+				}
+				if diff := cmp.Diff(tt.want, notes.String()); diff != "" {
+					t.Errorf("notes (-want +got):\n%s", diff)
+				}
+			})
+		}
+	}
+}
+
+func TestPkgAddNoteAfterWrite(t *testing.T) {
+	t.Parallel()
+	e := newPkgAddEnv(t, pkgAddOldText, `{}`, pkgAddWgetData)
+	if err := e.run(t, "wget", "--apt"); err != nil {
+		t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
+	}
+	want := "added package wget\nnot set for darwin: brew, cask; pass --brew/--cask or run chezmoi dots pkg add wget on darwin\n" +
+		"not set for windows: winget; pass --winget or run chezmoi dots pkg add wget on windows\n"
+	if got := e.out.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+const mergeText = "# top\n[package.wget]\nbrew = \"wget\" # keep\n\n# about other\n[package.other]\nbrew = \"o\"\n"
+
+func TestPkgAddMergesKeys(t *testing.T) {
+	t.Parallel()
+	const have = `{"package":{"wget":{"brew":"wget"},"other":{"brew":"o"}}}`
+	after := `{"package":{"wget":{"brew":"wget","apt":"wget"},"other":{"brew":"o"}}}`
+	tests := []struct {
+		name, text, want, stdout string
+		args                     []string
+	}{
+		{
+			"adds a missing key", mergeText,
+			"# top\n[package.wget]\nbrew = \"wget\" # keep\napt = \"wget\"\n\n# about other\n[package.other]\nbrew = \"o\"\n",
+			"updated package wget: apt\n",
+			[]string{"--apt"},
+		},
+		{
+			"crlf", strings.ReplaceAll(mergeText, "\n", "\r\n"),
+			strings.ReplaceAll("# top\n[package.wget]\nbrew = \"wget\" # keep\napt = \"wget\"\n\n# about other\n[package.other]\nbrew = \"o\"\n", "\n", "\r\n"),
+			"updated package wget: apt\n",
+			[]string{"--apt"},
+		},
+		{
+			"keys and roles in registry order", mergeText,
+			"# top\n[package.wget]\nbrew = \"wget\" # keep\napt = \"wget2\"\nroles = [\"work\"]\n\n# about other\n[package.other]\nbrew = \"o\"\n",
+			"updated package wget: apt, roles\n",
+			[]string{"--apt=wget2", "--roles", "work"},
+		},
+		{
+			"a key already set is left alone", mergeText,
+			"# top\n[package.wget]\nbrew = \"wget\" # keep\napt = \"wget\"\n\n# about other\n[package.other]\nbrew = \"o\"\n",
+			"updated package wget: apt\n",
+			[]string{"--brew=changed", "--apt"},
+		},
+		{
+			"last package in the file without a newline", "[package.wget]\nbrew = \"wget\"",
+			"[package.wget]\nbrew = \"wget\"\napt = \"wget\"\n", "updated package wget: apt\n",
+			[]string{"--apt"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPkgAddEnv(t, tt.text, have, after)
+			if err := e.run(t, append([]string{"wget"}, tt.args...)...); err != nil {
+				t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
+			}
+			if diff := cmp.Diff(tt.want, e.text(t)); diff != "" {
+				t.Errorf("packages.toml (-want +got):\n%s", diff)
+			}
+			if got := withoutNotes(e.out.String()); got != tt.stdout {
+				t.Errorf("stdout = %q, want %q", got, tt.stdout)
+			}
+			if strings.Contains(tt.name, "already set") && !strings.Contains(e.errw.String(), "brew already set; change it with chezmoi dots edit\n") {
+				t.Errorf("stderr lacks the already-set key:\n%s", e.errw.String())
+			}
+		})
+	}
+}
+
+func TestPkgAddMergeDryRunPrintsNewKeys(t *testing.T) {
+	t.Parallel()
+	e := newPkgAddEnv(t, mergeText, `{"package":{"wget":{"brew":"wget"}}}`)
+	if err := e.run(t, "wget", "--apt", "--dry-run"); err != nil {
+		t.Fatalf("pkg add = %v", err)
+	}
+	if got := withoutNotes(e.out.String()); got != "apt = \"wget\"\n" {
+		t.Errorf("stdout = %q", got)
+	}
+	if got := e.text(t); got != mergeText {
+		t.Errorf("a dry run changed packages.toml:\n%s", got)
+	}
+}
+
+func TestPkgAddMergeMergesDetectedKeys(t *testing.T) {
+	t.Parallel()
+	e := detectEnv(t, "[package.wget]\napt = \"wget\"\n", `{"package":{"wget":{"apt":"wget"}}}`, `{"package":{"wget":{"apt":"wget","brew":"wget"}}}`)
+	if err := e.run(t, "wget", "--yes"); err != nil {
+		t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
+	}
+	if got := e.text(t); got != "[package.wget]\napt = \"wget\"\nbrew = \"wget\"\n" {
+		t.Errorf("packages.toml:\n%s", got)
+	}
+	if got := withoutNotes(e.out.String()); got != "updated package wget: brew\n" {
+		t.Errorf("stdout = %q", got)
+	}
+}
+
+func TestPkgAddMergeSkipsDetectedKeysAlreadySet(t *testing.T) {
+	t.Parallel()
+	e := detectEnv(t, mergeText, `{"package":{"wget":{"brew":"wget"}}}`)
+	err := e.run(t, "wget", "--yes")
+	if err == nil || errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), "package wget already has these keys; change it with chezmoi dots edit") {
+		t.Fatalf("pkg add = %v, want the nothing-to-add error", err)
+	}
+	if !strings.Contains(e.errw.String(), "brew already set; change it with chezmoi dots edit\n") {
+		t.Errorf("stderr lacks the already-set key:\n%s", e.errw.String())
+	}
+	if got := e.text(t); got != mergeText {
+		t.Errorf("packages.toml changed:\n%s", got)
+	}
+}
+
+func TestPkgAddMergeNothingToAddLeavesFile(t *testing.T) {
+	t.Parallel()
+	e := newPkgAddEnv(t, mergeText, `{"package":{"wget":{"brew":"wget","apt":"wget","roles":["work"]}}}`)
+	err := e.run(t, "wget", "--apt", "--roles", "personal")
+	if err == nil || errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), "already has these keys") {
+		t.Fatalf("pkg add = %v, want the nothing-to-add error", err)
+	}
+	for _, key := range []string{"apt", "roles"} {
+		if !strings.Contains(e.errw.String(), key+" already set; change it with chezmoi dots edit\n") {
+			t.Errorf("stderr lacks %q:\n%s", key, e.errw.String())
+		}
+	}
+	if got := e.text(t); got != mergeText {
+		t.Errorf("packages.toml changed:\n%s", got)
+	}
+}
+
+func TestPkgAddMergeTableNotInFile(t *testing.T) {
+	t.Parallel()
+	const inline = "[package]\nwget = { brew = \"wget\" }\n"
+	e := newPkgAddEnv(t, inline, `{"package":{"wget":{"brew":"wget"}}}`)
+	err := e.run(t, "wget", "--apt")
+	if err == nil || errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), "not a [package.wget] table") {
+		t.Fatalf("pkg add = %v, want a plain error", err)
+	}
+	if got := e.text(t); got != inline {
+		t.Errorf("packages.toml changed:\n%s", got)
+	}
+}
+
+// ghTransport serves the GitHub API and counts the archive downloads.
+type ghTransport struct {
+	mu        sync.Mutex
+	api       []string
+	downloads []string
+	json      string
+}
+
+func (g *ghTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	body := archiveBytes
+	if r.URL.Host == "api.github.com" {
+		g.api = append(g.api, r.URL.Path)
+		body = []byte(g.json)
+	} else {
+		g.downloads = append(g.downloads, r.URL.String())
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(body)),
+		Header: http.Header{}, Request: r,
+	}, nil
+}
+
+const ghDownload = "https://github.com/octocat/example-tool/releases/download/v1.2.3/"
+
+func ghReleaseJSON() string {
+	names := []string{
+		"example-tool_1.2.3_linux_amd64.tar.gz", "example-tool_1.2.3_darwin_arm64.tar.gz", "example-tool_1.2.3_windows_amd64.zip",
+		"checksums.txt", "example-tool_1.2.3_linux_arm64.tar.gz", "example-tool_1.2.3_Linux_aarch64.tar.gz",
+	}
+	assets := make([]string, len(names))
+	for i, n := range names {
+		assets[i] = fmt.Sprintf(`{"name":%q,"browser_download_url":%q}`, n, ghDownload+n)
+	}
+	return `{"tag_name":"v1.2.3","assets":[` + strings.Join(assets, ",") + `]}`
+}
+
+func ghEnv(t *testing.T, text string, datas ...string) (*pkgAddEnv, *ghTransport) {
+	t.Helper()
+	gh := &ghTransport{json: ghReleaseJSON()}
+	e := newPkgAddEnv(t, text, datas...)
+	e.http = gh
+	return e, gh
+}
+
+func TestPkgAddGitHub(t *testing.T) { //nolint:gocognit // table test with many output checks
+	t.Parallel()
+	sum := fmt.Sprintf("%x", sha256.Sum256(archiveBytes))
+	valid := fmt.Sprintf(`{"release":{"example-tool":{"version":"1.2.3","url":%q,"type":"archive-file","path":"example-tool","exe":true,
+		"target":{"linux/amd64":"linux_amd64.tar.gz","darwin/arm64":"darwin_arm64.tar.gz","windows/amd64":"windows_amd64.zip"},
+		"sha256":{"linux/amd64":%q,"darwin/arm64":%q,"windows/amd64":%q}}}}`,
+		ghDownload[:len(ghDownload)-len("v1.2.3/")]+"v{version}/example-tool_{version}_{target}", sum, sum, sum)
+	tests := []struct {
+		name  string
+		args  []string
+		stdin string
+		tty   bool
+	}{
+		{"yes", []string{"--yes"}, "", false},
+		{"tty confirms", nil, "y\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e, gh := ghEnv(t, pkgAddOldText, `{}`, valid)
+			e.stdin, e.tty = tt.stdin, tt.tty
+			if err := e.run(t, append([]string{"example-tool", "--github", "octocat/example-tool", "--roles", "work"}, tt.args...)...); err != nil {
+				t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
+			}
+			want := pkgAddOldText + "\n" +
+				"[release.example-tool]\nversion = \"1.2.3\"\nurl = \"" + ghDownload[:len(ghDownload)-len("v1.2.3/")] + "v{version}/example-tool_{version}_{target}\"\n" +
+				"type = \"archive-file\"\npath = \"example-tool\"\nexe = true\nroles = [\"work\"]\n\n" +
+				"[release.example-tool.target]\n\"darwin/arm64\" = \"darwin_arm64.tar.gz\"\n\"linux/amd64\" = \"linux_amd64.tar.gz\"\n\"windows/amd64\" = \"windows_amd64.zip\"\n\n" +
+				"[release.example-tool.sha256]\n\"darwin/arm64\" = \"" + sum + "\"\n\"linux/amd64\" = \"" + sum + "\"\n\"windows/amd64\" = \"" + sum + "\"\n"
+			if diff := cmp.Diff(want, e.text(t)); diff != "" {
+				t.Errorf("packages.toml (-want +got):\n%s", diff)
+			}
+			if got := e.out.String(); got != "added release example-tool\n" {
+				t.Errorf("stdout = %q", got)
+			}
+			if diff := cmp.Diff([]string{"/repos/octocat/example-tool/releases/latest"}, gh.api); diff != "" {
+				t.Errorf("api requests (-want +got):\n%s", diff)
+			}
+			if len(gh.downloads) != 3 {
+				t.Errorf("downloads = %v, want one per target", gh.downloads)
+			}
+			for _, w := range []string{
+				`  version = "1.2.3"`, `  type = "archive-file"`, `  path = "example-tool"`, "  exe = true",
+				`  linux/amd64 = "linux_amd64.tar.gz"`, "  left out: checksums.txt, ", "  ambiguous: linux/arm64: ",
+			} {
+				if !strings.Contains(e.errw.String(), w) {
+					t.Errorf("stderr lacks %q:\n%s", w, e.errw.String())
+				}
+			}
+		})
+	}
+}
+
+func TestPkgAddGitHubDryRunDownloadsNothing(t *testing.T) {
+	t.Parallel()
+	e, gh := ghEnv(t, pkgAddOldText, `{}`)
+	if err := e.run(t, "example-tool", "--github", "octocat/example-tool", "--yes", "--dry-run"); err != nil {
+		t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
+	}
+	if len(gh.downloads) != 0 || len(gh.api) != 1 {
+		t.Errorf("api = %v, downloads = %v, want one API call and no download", gh.api, gh.downloads)
+	}
+	for _, w := range []string{"[release.example-tool]\n", "type = \"archive-file\"\n", "exe = true\n", "# sha256 computed when written\n"} {
+		if !strings.Contains(e.out.String(), w) {
+			t.Errorf("stdout lacks %q:\n%s", w, e.out.String())
+		}
+	}
+	if got := e.text(t); got != pkgAddOldText {
+		t.Errorf("a dry run changed packages.toml:\n%s", got)
+	}
+}
+
+func TestPkgAddGitHubNeedsConfirmation(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, stdin string
+		tty         bool
+		args        []string
+		usage       bool
+	}{
+		{"no tty without --yes", "", false, nil, true},
+		{"dry run no tty without --yes", "", false, []string{"--dry-run"}, true},
+		{"tty declines", "n\n", true, nil, false},
+		{"tty empty answer declines", "\n", true, nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e, gh := ghEnv(t, pkgAddOldText, `{}`)
+			e.stdin, e.tty = tt.stdin, tt.tty
+			err := e.run(t, append([]string{"example-tool", "--github", "octocat/example-tool"}, tt.args...)...)
+			if err == nil || errors.Is(err, cli.ErrUsage) != tt.usage {
+				t.Fatalf("pkg add = %v, want usage error %v", err, tt.usage)
+			}
+			if len(gh.downloads) != 0 {
+				t.Errorf("downloads = %v", gh.downloads)
+			}
+			if got := e.text(t); got != pkgAddOldText {
+				t.Errorf("packages.toml changed:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestPkgAddGitHubUsageErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"with --version", []string{"--version", "1"}},
+		{"with --url", []string{"--url", releaseURL}},
+		{"with --target", []string{"--target", "linux/amd64=x"}},
+		{"with --brew", []string{"--brew"}},
+		{"with --cask", []string{"--cask", "c"}},
+		{"with --uv", []string{"--uv"}},
+		{"empty repository", []string{"--github", ""}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := newPkgAddEnv(t, pkgAddOldText, `{}`)
+			e.http = failingTransport{t}
+			args := append([]string{"example-tool", "--github", "octocat/example-tool"}, tt.args...)
+			if err := e.run(t, args...); !errors.Is(err, cli.ErrUsage) {
+				t.Fatalf("pkg add %v = %v, want ErrUsage", args, err)
+			}
+			if e.runner.calls != 0 {
+				t.Errorf("a rejected command read the chezmoi data")
+			}
+		})
+	}
+}
+
+func TestPkgAddHelpExplainsDetectionAndGitHub(t *testing.T) {
+	t.Parallel()
+	e := newPkgAddEnv(t, "")
+	if err := e.run(t, "--help"); err != nil {
+		t.Fatalf("pkg add --help = %v", err)
+	}
+	for _, want := range []string{"never a public index", "turns detection off", "--github", "--yes", "GH_TOKEN"} {
+		if !strings.Contains(e.out.String(), want) {
+			t.Errorf("help lacks %q", want)
+		}
 	}
 }
 

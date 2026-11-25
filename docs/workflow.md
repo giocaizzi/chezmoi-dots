@@ -36,10 +36,12 @@
 
    Review the change to `.chezmoidata/packages.toml` and to any externals file, then commit and push it in the dotfiles repository (`chezmoi git -- diff`, `chezmoi git -- commit`, `chezmoi git -- push`). On each machine run `chezmoi apply`, or `chezmoi dots upgrade dotfiles` to pull and apply. `pkg bump` never installs anything.
 
-   To start tracking a new tool, `pkg add` appends it to `.chezmoidata/packages.toml` and validates the registry; preview with `--dry-run`. See [pkg add](cli.md#pkg-add).
+   To start tracking a new tool, `pkg add` adds it to `.chezmoidata/packages.toml` and validates the registry; preview with `--dry-run`. Without a source flag it asks this machine's package managers (brew and cask on macOS, apt on Linux, winget on Windows, uv and npm everywhere; never a public index) and confirms what they find. The other OSes' keys come only from flags or from running `pkg add <name>` on that OS, which adds the missing keys to the existing package. `--github owner/repo` proposes a pinned release from the latest GitHub release. See [pkg add](cli.md#pkg-add).
 
    ```sh
+   chezmoi dots pkg add wget
    chezmoi dots pkg add wget --brew --apt
+   chezmoi dots pkg add example-tool --github octocat/example-tool
    chezmoi dots pkg add example-tool --release --version 1.2.3 --url 'https://example.com/{version}/tool-{target}.tar.gz' --target linux/amd64=linux-x86_64
    ```
 
