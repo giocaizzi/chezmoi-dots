@@ -27,6 +27,10 @@ type Finder struct {
 	Getenv func(string) string // nil reads nothing
 }
 
+const gitBin = "git"
+
+var commit = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
 var numeric = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,2}$`)
 
 // Latest returns the newest stable version published upstream.
@@ -34,7 +38,7 @@ func (f Finder) Latest(ctx context.Context, up pkgreg.Upstream) (string, error) 
 	switch up.Kind {
 	case "git":
 		out, err := chez.Output(ctx, f.Runner, chez.Cmd{
-			Args: []string{"git", "ls-remote", "--tags", "--refs", up.Repo},
+			Args: []string{gitBin, "ls-remote", "--tags", "--refs", up.Repo},
 			Env:  chez.GitNoPromptEnv(ctx, f.Runner, f.Getenv, ""), // never ask for credentials or a passphrase
 		})
 		if err != nil {
@@ -46,6 +50,24 @@ func (f Finder) Latest(ctx context.Context, up pkgreg.Upstream) (string, error) 
 	default:
 		return "", fmt.Errorf("unknown upstream kind %q", up.Kind)
 	}
+}
+
+// Head returns the commit the default branch (HEAD) of remote points at.
+func (f Finder) Head(ctx context.Context, remote string) (string, error) {
+	out, err := chez.Output(ctx, f.Runner, chez.Cmd{
+		Args: []string{gitBin, "ls-remote", remote, "HEAD"},
+		Env:  chez.GitNoPromptEnv(ctx, f.Runner, f.Getenv, ""), // never ask for credentials or a passphrase
+	})
+	if err != nil {
+		return "", fmt.Errorf("read HEAD of %s: %w", remote, err)
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == "HEAD" && commit.MatchString(fields[0]) {
+			return fields[0], nil
+		}
+	}
+	return "", fmt.Errorf("no HEAD in git ls-remote of %s", remote)
 }
 
 // newestTag picks the highest numeric version among tags named <prefix><version>.
