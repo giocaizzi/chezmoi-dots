@@ -315,19 +315,19 @@ func TestUsageReportsLocalHelpOnce(t *testing.T) {
 
 func TestHelpGoldens(t *testing.T) {
 	t.Parallel()
-	for _, page := range []string{"root", "audit", "view", "pkg", "live"} {
+	for _, page := range []string{"root", "audit", "view", "pkg", "pkg add", "live"} {
 		t.Run(page, func(t *testing.T) {
 			t.Parallel()
 			args := []string{"help"}
 			if page != "root" {
-				args = append(args, page)
+				args = append(args, strings.Fields(page)...)
 			}
 			var out, errw bytes.Buffer
 			trap := &helpTrap{}
 			if err := cli.Run(t.Context(), trap.deps(&out, &errw), args); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join("testdata", "help_"+page+".golden")
+			path := filepath.Join("testdata", "help_"+strings.ReplaceAll(page, " ", "_")+".golden")
 			want := helpGolden(t, path, out.Bytes())
 			if !bytes.Equal(out.Bytes(), want) {
 				t.Errorf("help differs from %s; review changes before UPDATE_GOLDEN=1", path)
