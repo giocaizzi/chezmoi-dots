@@ -460,7 +460,7 @@ func TestTree(t *testing.T) {
 		s.WorkingTree = "/wt"
 		s.Stat = statOf(map[string]time.Time{fetchHead: fetchedAt})
 		want := inventory.Tree{Known: true, Branch: "main", Upstream: "origin/main", Ahead: 2, Behind: 5, Dirty: 2, Fetched: fetchedAt}
-		if diff := cmp.Diff(want, s.tree(t.Context())); diff != "" {
+		if diff := cmp.Diff(want, s.Tree(t.Context())); diff != "" {
 			t.Errorf("tree (-want +got):\n%s", diff)
 		}
 		if r.called("git -C /wt fetch") {
@@ -478,18 +478,18 @@ func TestTree(t *testing.T) {
 		s := base(newRunner(m))
 		s.WorkingTree = "/wt"
 		want := inventory.Tree{Known: true, Dirty: 2}
-		if diff := cmp.Diff(want, s.tree(t.Context())); diff != "" {
+		if diff := cmp.Diff(want, s.Tree(t.Context())); diff != "" {
 			t.Errorf("tree (-want +got):\n%s", diff)
 		}
 	})
 	t.Run("unknown", func(t *testing.T) {
 		t.Parallel()
-		if got := base(newRunner(nil)).tree(t.Context()); got.Known {
+		if got := base(newRunner(nil)).Tree(t.Context()); got.Known {
 			t.Errorf("no working tree: Known")
 		}
 		s := base(newRunner(nil))
 		s.WorkingTree = "/wt"
-		if got := s.tree(t.Context()); got.Known {
+		if got := s.Tree(t.Context()); got.Known {
 			t.Errorf("git failing: Known")
 		}
 	})
@@ -505,7 +505,7 @@ func TestTreeFetch(t *testing.T) {
 		r := newRunner(m)
 		s := base(r)
 		s.WorkingTree, s.Fetch, s.Offline = "/wt", tt.fetch, tt.offline
-		tree := s.tree(t.Context())
+		tree := s.Tree(t.Context())
 		if got := r.called("git -C /wt fetch"); got != tt.want {
 			t.Errorf("fetch=%v offline=%v: fetched = %v, want %v", tt.fetch, tt.offline, got, tt.want)
 		}

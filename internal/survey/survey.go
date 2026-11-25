@@ -62,7 +62,7 @@ func (s Survey) Run(ctx context.Context, sel inventory.Selection) inventory.Repo
 			groups[i] = &g
 		})
 	}
-	wg.Go(func() { rep.Tree = s.tree(ctx) })
+	wg.Go(func() { rep.Tree = s.Tree(ctx) })
 	wg.Wait()
 	for _, g := range groups {
 		if g != nil {
@@ -467,7 +467,9 @@ func (s Survey) scripts(ctx context.Context, pkgs []inventory.PackageSel) invent
 	return g
 }
 
-func (s Survey) tree(ctx context.Context) inventory.Tree {
+// Tree reads the dotfiles working tree against its upstream (fetching first with
+// Fetch and not Offline). It never fails: what git cannot tell is left unknown.
+func (s Survey) Tree(ctx context.Context) inventory.Tree {
 	wt := s.WorkingTree
 	if wt == "" {
 		return inventory.Tree{}

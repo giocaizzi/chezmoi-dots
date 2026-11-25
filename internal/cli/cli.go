@@ -39,6 +39,8 @@ var ErrUsage = edit.ErrUsage
 
 const (
 	cmdEdit     = "edit"
+	cmdAdd      = "add"
+	cmdStatus   = "status"
 	cmdView     = "view"
 	cmdList     = "list"
 	cmdLint     = "lint"
@@ -65,7 +67,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 	cmd, rest := cmdEdit, args
 	if len(args) > 0 {
 		switch args[0] {
-		case cmdEdit, cmdView, cmdList, cmdLint, cmdAudit, cmdOutdated, cmdBump, cmdUpgrade, cmdLive, cmdVersion, cmdHelp:
+		case cmdEdit, cmdAdd, cmdStatus, cmdView, cmdList, cmdLint, cmdAudit, cmdOutdated, cmdBump, cmdUpgrade, cmdLive, cmdVersion, cmdHelp:
 			cmd, rest = args[0], args[1:]
 		case "-h", "--help":
 			cmd, rest = "", args
@@ -94,6 +96,10 @@ func (d Deps) run(ctx context.Context, cmd string, args []string) error {
 	switch cmd {
 	case cmdEdit:
 		return d.edit(ctx, args)
+	case cmdAdd:
+		return d.add(ctx, args)
+	case cmdStatus:
+		return d.status(ctx, args)
 	case cmdView:
 		return d.view(ctx, args)
 	case cmdList:
