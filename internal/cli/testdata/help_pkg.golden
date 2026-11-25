@@ -1,0 +1,23 @@
+chezmoi dots pkg — Package and pinned release lifecycle
+
+USAGE
+  chezmoi dots pkg <command> [options]
+
+COMMANDS
+  status     Every tool: installed, pinned and latest versions
+  bump       Update pinned versions and checksums in the source
+
+ARGUMENTS
+  command  status or bump; the command is the first argument after pkg.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+
+ENVIRONMENT
+  CHEZMOI_EXECUTABLE  chezmoi executable (default: chezmoi).
+  CHEZMOI_CONFIG_FILE  chezmoi config file (default: chezmoi's config).
+  CHEZMOI_SOURCE_DIR  source directory (default: ask chezmoi; honors .chezmoiroot).
+
+EXAMPLES
+  chezmoi dots pkg status
+  chezmoi dots pkg bump --dry-run

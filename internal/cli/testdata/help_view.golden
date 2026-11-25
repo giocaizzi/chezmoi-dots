@@ -4,12 +4,11 @@ USAGE
   chezmoi dots view [<what>] [options]
 
 ARGUMENTS
-  what  Registry entry, source path or target path. Required unless --matrix or --all requests an overview.
-  Default: render the current configuration; --matrix/--all render all nine OS/role configurations.
+  what  Registry entry, source path or target path. Required unless --matrix requests an overview.
+  Default: render the current configuration; --matrix renders all nine OS/role configurations.
 
 OPTIONS
   -h, --help  Show this help and exit successfully.
-  --all  overview across all registry entries (default: "false")
   --as <os[,role]>  render one os[,role] (darwin|linux|windows; personal|work|light) (default: "")
   --matrix  render every configuration (default: "false")
 

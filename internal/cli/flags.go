@@ -17,12 +17,11 @@ func newFlags(name string) *flag.FlagSet {
 	case cmdView:
 		fs.String("as", "", "render one `os[,role]` (darwin|linux|windows; personal|work|light)")
 		fs.Bool("matrix", false, "render every configuration")
-		fs.Bool("all", false, "overview across all registry entries")
-	case cmdOutdated:
-		fs.Bool("offline", false, "skip network lookups")
+	case cmdPkgState:
+		fs.Bool("offline", false, "skip upstream lookups (releases, uv, npm) and the git fetch")
 		fs.Bool("fetch", false, "git fetch the dotfiles first")
 		fs.Bool("check", false, "exit non-zero for outdated, drifted or missing tools")
-	case cmdBump:
+	case cmdPkgBump:
 		fs.Bool("dry-run", false, "show what would change, write nothing")
 	case cmdUpgrade:
 		fs.Bool("dry-run", false, "show upgrade commands without executing upgrade steps")
