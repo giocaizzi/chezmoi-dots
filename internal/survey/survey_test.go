@@ -741,6 +741,53 @@ func TestArchives(t *testing.T) {
 	}
 }
 
+func TestArchiveSkips(t *testing.T) {
+	t.Parallel()
+	skip := func(entry, reason string) extpin.Skip {
+		return extpin.Skip{File: "ext.toml", Entry: entry, Reason: reason}
+	}
+	one := []extpin.Skip{skip("a", "more than one sha256")}
+	many := []extpin.Skip{skip("a", "r1"), {File: "dir", Reason: "cannot read"}, skip("c", "r3"), skip("d", "r4")}
+	pin := archivePin("octocat/a", strings.Repeat("1", 40))
+	tests := []struct {
+		name     string
+		pins     []extpin.Pin
+		skips    []extpin.Skip
+		offline  bool
+		wantNote string
+		wantRows int
+	}{
+		{"skips alone make the group", nil, one, true, offlineNote + "; skipped 1: a: more than one sha256", 0},
+		{
+			"entry or file, at most three",
+			[]extpin.Pin{pin},
+			many, true,
+			offlineNote + "; skipped 4: a: r1; dir: cannot read; c: r3; ...", 1,
+		},
+		{
+			"joined with the lookup note",
+			[]extpin.Pin{pin},
+			one, false,
+			"latest unknown for 1 (no network or lookup failed); skipped 1: a: more than one sha256", 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := base(newRunner(nil))
+			s.Archives, s.ArchiveSkips, s.Offline = tt.pins, tt.skips, tt.offline
+			s.Head = (&headFake{}).Head
+			g := group(t, s.Run(t.Context(), inventory.Selection{}), inventory.Archive)
+			if g.Note != tt.wantNote {
+				t.Errorf("Note = %q, want %q", g.Note, tt.wantNote)
+			}
+			if len(g.Tools) != tt.wantRows {
+				t.Errorf("Tools = %v, want %d rows", g.Tools, tt.wantRows)
+			}
+		})
+	}
+}
+
 func TestNoArchivesNoGroup(t *testing.T) {
 	t.Parallel()
 	rep := base(newRunner(nil)).Run(t.Context(), inventory.Selection{})

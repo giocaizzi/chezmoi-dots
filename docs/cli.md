@@ -321,10 +321,16 @@ where `<sha>` is a full 40-hex commit. The row's name is the repository path
 Limits: only TOML externals files; the URL must be written literally (a commit or
 host coming from a template expression is not recognised); an entry with more
 than one archive URL or more than one `sha256` (for example per-OS template
-branches) is skipped; only the default branch HEAD is compared (no tags or other
+branches), or with a `sha384`, `sha512` or `size` checksum, is skipped (bump it
+by hand); table headers may have spaces inside the brackets and a trailing
+comment (`[ ".k" ] # note`), but `[[...]]` is not read; only the default branch HEAD is compared (no tags or other
 branches); archives are listed from the whole source regardless of this
 machine's OS or role; the installed copy is not inspected (`chezmoi apply`
 installs the pin).
+
+Skipped entries are listed in the table's note (`skipped N: <entry>: <reason>`,
+the first three, then `; ...`). An unreadable directory or file in the source is
+reported the same way and never fails the command; the rest is still read.
 
 ```sh
 chezmoi dots pkg status --offline
@@ -349,8 +355,16 @@ GitLab URL), downloads the new archive and writes its SHA-256 into the entry's
 `sha256` checksum (`checksum.sha256 = "..."`, a `[<entry>.checksum]` subtable, or
 an inline `checksum = { sha256 = ... }`), editing the externals file in place as
 text (templates and comments are kept). An entry without a checksum gets only the
-URL rewritten. Output is one line per pin, `<name> <old7> → <new7>`; when nothing
-is outdated it prints `all pins are up to date`.
+URL rewritten. An entry with a `sha384`, `sha512` or `size` checksum is not a pin
+(a bump cannot keep it valid) and is left untouched. Output is one line per pin,
+`<name> <old7> → <new7>`; when nothing is outdated it prints
+`all pins are up to date`. Each skipped entry or unreadable path is printed to
+stderr as `skip <file>[ <entry>]: <reason>` and is not an error.
+
+Files are written atomically: each new text goes to a temp file beside its
+original (same mode), and the files are renamed over the originals only once all
+temp files are ready, so nothing is written if any new file cannot be prepared.
+If a rename fails, the error names the files already written.
 
 Options: `--dry-run` (false; download and report changes without writing), `-h`, `--help`. Environment: shared
 chezmoi and output settings; network access is needed even for a dry run.

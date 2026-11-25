@@ -3,6 +3,7 @@ package extpin
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -68,7 +69,7 @@ func TestScan(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := Scan("f", tt.text)
+			got, _ := Scan("f", tt.text)
 			if diff := cmp.Diff(tt.want, got, cmp.AllowUnexported(Pin{}), cmpopts.EquateEmpty()); diff != "" {
 				t.Errorf("Scan() (-want +got):\n%s", diff)
 			}
@@ -76,9 +77,92 @@ func TestScan(t *testing.T) {
 	}
 }
 
+func TestScanHeaders(t *testing.T) {
+	t.Parallel()
+	body := "\nurl = \"" + ghURL + "\"\n"
+	tests := []struct {
+		name, header, wantEntry string
+	}{
+		{"trailing comment", `[".k"] # c`, `".k"`},
+		{"inner spaces", `[ ".k" ]`, `".k"`},
+		{"spaced dots", `[ "a" . b ]`, `"a".b`},
+		{"single quotes", `['a b']`, `'a b'`},
+		{"quoted bracket", `["a]b"]`, `"a]b"`},
+		{"escaped quote", `["a\"]b"] # c`, `"a\"]b"`},
+		{"leading spaces", `   [a]`, `a`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pins, _ := Scan("f", tt.header+body)
+			if len(pins) != 1 || pins[0].Entry != tt.wantEntry {
+				t.Errorf("Scan(%q) = %+v, want one pin with entry %q", tt.header, pins, tt.wantEntry)
+			}
+		})
+	}
+	notHeaders := []string{`[[a]]`, `["a", "b"]`, `[a] x`, `["a`, `[]`, `[a`}
+	for _, h := range notHeaders {
+		t.Run("not a header "+h, func(t *testing.T) {
+			t.Parallel()
+			if pins, _ := Scan("f", h+body); len(pins) != 0 {
+				t.Errorf("Scan(%q) = %+v, want no pin", h, pins)
+			}
+		})
+	}
+	t.Run("spaced subtable stays in its entry", func(t *testing.T) {
+		t.Parallel()
+		text := "[ \".k\" ]\nurl = \"" + ghURL + "\"\n[ \".k\" . checksum ]\nsha256 = \"" + sumA + "\"\n"
+		pins, skips := Scan("f", text)
+		if len(pins) != 1 || pins[0].Sum != sumA || len(skips) != 0 {
+			t.Errorf("Scan() = %+v, %+v, want one pin with the checksum", pins, skips)
+		}
+	})
+}
+
+func TestScanSkips(t *testing.T) {
+	t.Parallel()
+	ghAlt := strings.ReplaceAll(ghURL, sha1, sha2)
+	sum512 := strings.Repeat("c", 128)
+	url := "url = \"" + ghURL + "\"\n"
+	tests := []struct {
+		name, text, reason string
+	}{
+		{"sha384 dotted", "[a]\n" + url + "checksum.sha384 = \"x\"\n", "checksum sha384 is not supported; bump it by hand"},
+		{"sha512 subtable", "[a]\n" + url + "[a.checksum]\nsha512 = \"" + sum512 + "\"\n", "checksum sha512 is not supported; bump it by hand"},
+		{"size inline", "[a]\n" + url + "checksum = { size = 3 }\n", "checksum size is not supported; bump it by hand"},
+		{"sha256 and sha512", "[a]\n" + url + "checksum.sha256 = \"" + sumA + "\"\nchecksum.sha512 = \"x\"\n", "checksum sha512 is not supported; bump it by hand"},
+		{"two urls", "[a]\n" + url + "url = \"" + ghAlt + "\"\n", "more than one archive URL"},
+		{"two sha256", "[a]\n" + url + "checksum.sha256 = \"" + sumA + "\"\nchecksum.sha256 = \"" + sumB + "\"\n", "more than one sha256"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			pins, skips := Scan("f", tt.text)
+			want := []Skip{{File: "f", Entry: "a", Reason: tt.reason}}
+			if len(pins) != 0 {
+				t.Errorf("Scan() pins = %+v, want none", pins)
+			}
+			if diff := cmp.Diff(want, skips); diff != "" {
+				t.Errorf("Scan() skips (-want +got):\n%s", diff)
+			}
+			if _, err := Set(tt.text, Pin{File: "f", Entry: "a", Repo: "octocat/example", SHA: sha1}, sha2, sumB); err == nil {
+				t.Error("Set() of a skipped entry: want a not found error")
+			}
+		})
+	}
+	t.Run("entry without an archive is not a skip", func(t *testing.T) {
+		t.Parallel()
+		pins, skips := Scan("f", "[a]\nurl = \"https://example.com/x\"\nchecksum.sha512 = \"x\"\n")
+		if len(pins) != 0 || len(skips) != 0 {
+			t.Errorf("Scan() = %+v, %+v, want nothing", pins, skips)
+		}
+	})
+}
+
 func TestPinHelpers(t *testing.T) {
 	t.Parallel()
-	p := Scan("f", "[a]\nurl = \""+glURL+"\"\n")[0]
+	pins, _ := Scan("f", "[a]\nurl = \""+glURL+"\"\n")
+	p := pins[0]
 	if got, want := p.Name(), "group/sub/example"; got != want {
 		t.Errorf("Name() = %q, want %q", got, want)
 	}
@@ -93,7 +177,7 @@ func TestPinHelpers(t *testing.T) {
 func TestSet(t *testing.T) {
 	t.Parallel()
 	text := "# keep me\n[a]\nurl = \"" + glURL + "\"\nchecksum.sha256 = \"" + sumA + "\"\n[b]\nurl = \"" + ghURL + "\"\nchecksum.sha256 = \"" + sumA + "\"\n"
-	pins := Scan("f", text)
+	pins, _ := Scan("f", text)
 	a := pins[0]
 
 	t.Run("rewrites url twice and checksum only in its entry", func(t *testing.T) {
@@ -110,7 +194,8 @@ func TestSet(t *testing.T) {
 	t.Run("preserves crlf", func(t *testing.T) {
 		t.Parallel()
 		crlf := strings.ReplaceAll(text, "\n", "\r\n")
-		got, err := Set(crlf, Scan("f", crlf)[1], sha2, sumB)
+		crlfPins, _ := Scan("f", crlf)
+		got, err := Set(crlf, crlfPins[1], sha2, sumB)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,9 +265,9 @@ func TestFind(t *testing.T) {
 		}
 	}
 	slices.Sort(want)
-	pins, err := Find(src)
-	if err != nil {
-		t.Fatal(err)
+	pins, skips := Find(src)
+	if len(skips) != 0 {
+		t.Errorf("Find() skips = %+v, want none", skips)
 	}
 	got := make([]string, 0, len(pins))
 	for _, p := range pins {
@@ -195,8 +280,53 @@ func TestFind(t *testing.T) {
 
 func TestFindMissing(t *testing.T) {
 	t.Parallel()
-	if _, err := Find(filepath.Join(t.TempDir(), "nope")); err == nil {
-		t.Error("Find() of a missing dir: want an error")
+	missing := filepath.Join(t.TempDir(), "nope")
+	pins, skips := Find(missing)
+	if len(pins) != 0 || len(skips) != 1 || skips[0].File != missing || skips[0].Entry != "" || skips[0].Reason == "" {
+		t.Errorf("Find() of a missing dir = %+v, %+v, want one skip for it", pins, skips)
+	}
+}
+
+func TestFindUnreadable(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("Unix permissions do not apply")
+	}
+	src := t.TempDir()
+	body := []byte("[a]\nurl = \"" + ghURL + "\"\n")
+	locked := filepath.Join(src, "locked")
+	for _, dir := range []string{locked, filepath.Join(src, "ok")} {
+		if err := os.Mkdir(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".chezmoiexternal.toml"), body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unreadable := filepath.Join(src, "bad", ".chezmoiexternal.toml")
+	if err := os.MkdirAll(filepath.Dir(unreadable), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unreadable, body, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o750) })
+	pins, skips := Find(src)
+	if len(pins) != 1 || pins[0].File != filepath.Join(src, "ok", ".chezmoiexternal.toml") {
+		t.Errorf("Find() pins = %+v, want only the readable one", pins)
+	}
+	files := make([]string, 0, len(skips))
+	for _, s := range skips {
+		if s.Entry != "" || s.Reason == "" {
+			t.Errorf("skip %+v: want a path skip with a reason", s)
+		}
+		files = append(files, s.File)
+	}
+	if diff := cmp.Diff([]string{unreadable, locked}, files); diff != "" {
+		t.Errorf("Find() skipped files (-want +got):\n%s", diff)
 	}
 }
 
@@ -206,8 +336,8 @@ func TestFindSkipsDirNamedLikeExternals(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(src, ".chezmoiexternal.toml"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if pins, err := Find(src); err != nil || len(pins) != 0 {
-		t.Errorf("Find() = %v, %v, want none", pins, err)
+	if pins, skips := Find(src); len(pins) != 0 || len(skips) != 0 {
+		t.Errorf("Find() = %v, %v, want none", pins, skips)
 	}
 }
 
@@ -218,26 +348,22 @@ func TestSetLeavesNoStaleChecksum(t *testing.T) {
 	sum512 := strings.Repeat("c", 128)
 	tests := []struct {
 		name  string
-		xfail string
 		text  string
 		stale string // text that must not survive a bump of the archive pin
 	}{
 		{
-			name:  "xfail: header with a trailing comment",
-			xfail: "xfail: a `[key] # comment` header is not recognised, so the archive is folded into the previous entry and its sha256 is overwritten",
+			name: "header with a trailing comment",
 			text: "[\".local/bin/tool\"]\ntype = \"file\"\nurl = \"https://example.com/tool\"\nchecksum.sha256 = \"" + sumA + "\"\n" +
 				"[\".vim/x\"] # pinned plugin\ntype = \"archive\"\nurl = \"" + ghURL + "\"\n",
 			stale: "url = \"https://example.com/tool\"\nchecksum.sha256 = \"" + sumB + "\"",
 		},
 		{
-			name:  "xfail: spaced header with a checksum subtable",
-			xfail: "xfail: `[ key ]` and `[ key.checksum ]` are read as two entries, so the sha256 is left for the old commit",
+			name:  "spaced header with a checksum subtable",
 			text:  "[ \".vim/x\" ]\ntype = \"archive\"\nurl = \"" + ghURL + "\"\n[ \".vim/x\".checksum ]\nsha256 = \"" + sumA + "\"\n",
 			stale: "sha256 = \"" + sumA + "\"",
 		},
 		{
-			name:  "xfail: sha512 checksum",
-			xfail: "xfail: checksum.sha512 (also sha384, size) is not recognised, so the commit moves and the old checksum stays",
+			name:  "sha512 checksum is skipped, not bumped",
 			text:  "[\".vim/x\"]\ntype = \"archive\"\nurl = \"" + ghURL + "\"\nchecksum.sha512 = \"" + sum512 + "\"\n",
 			stale: sum512,
 		},
@@ -245,10 +371,8 @@ func TestSetLeavesNoStaleChecksum(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.xfail != "" {
-				t.Skip(tt.xfail)
-			}
-			for _, p := range Scan("f", tt.text) {
+			pins, _ := Scan("f", tt.text)
+			for _, p := range pins {
 				got, err := Set(tt.text, p, sha2, sumB)
 				if err != nil {
 					continue // refusing the pin is safe
@@ -268,7 +392,8 @@ func FuzzScanSet(f *testing.F) {
 	f.Add("[a]\r\nurl = \"" + glURL + "\"\r\n[a.checksum]\r\nsha256 = \"" + sumA + "\"\r\n")
 	f.Add("{{ if x }}\n[a]\nurl = \"" + ghURL + "\"\n{{ end }}\n[b]\nchecksum = { sha256 = \"" + sumA + "\" }\n")
 	f.Fuzz(func(t *testing.T, text string) {
-		for _, p := range Scan("f", text) {
+		pins, _ := Scan("f", text)
+		for _, p := range pins {
 			got, err := Set(text, p, sha2, sumB)
 			if err != nil {
 				t.Fatalf("Set(%+v) of a scanned pin: %v", p, err)

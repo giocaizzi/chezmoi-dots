@@ -4,6 +4,7 @@ package survey
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -31,25 +32,27 @@ const (
 	wingetTimeout   = 60 * time.Second // winget export is slow
 	offlineNote     = "offline: latest versions not looked up"
 	unknownLatestFn = "latest unknown for %d (no network or lookup failed)"
+	maxSkipsShown   = 3
 	homeUnknownNote = "home directory unknown: installed versions not read"
 )
 
 // Survey gathers the overview of this machine.
 type Survey struct {
-	Runner      chez.Runner
-	Latest      func(context.Context, pkgreg.Upstream) (string, error) // release.Finder.Latest
-	Archives    []extpin.Pin                                           // commit-pinned archive externals
-	Head        func(context.Context, string) (string, error)          // release.Finder.Head: the commit HEAD of a remote points at
-	Stat        func(string) (fs.FileInfo, error)                      // os.Stat
-	LookPath    func(string) (string, error)
-	Getenv      func(string) string // nil reads nothing
-	Home        string
-	GOOS        string
-	WorkingTree string        // the dotfiles git checkout; "" when unknown
-	Offline     bool          // no network: no upstream or registry lookups, no fetch
-	Fetch       bool          // git fetch the working tree first
-	Timeout     time.Duration // per local command; 0 means 10s
-	NetTimeout  time.Duration // per network lookup; 0 means 15s
+	Runner       chez.Runner
+	Latest       func(context.Context, pkgreg.Upstream) (string, error) // release.Finder.Latest
+	Archives     []extpin.Pin                                           // commit-pinned archive externals
+	ArchiveSkips []extpin.Skip                                          // externals and paths found but not handled
+	Head         func(context.Context, string) (string, error)          // release.Finder.Head: the commit HEAD of a remote points at
+	Stat         func(string) (fs.FileInfo, error)                      // os.Stat
+	LookPath     func(string) (string, error)
+	Getenv       func(string) string // nil reads nothing
+	Home         string
+	GOOS         string
+	WorkingTree  string        // the dotfiles git checkout; "" when unknown
+	Offline      bool          // no network: no upstream or registry lookups, no fetch
+	Fetch        bool          // git fetch the working tree first
+	Timeout      time.Duration // per local command; 0 means 10s
+	NetTimeout   time.Duration // per network lookup; 0 means 15s
 }
 
 // Run surveys sel. It never fails: what cannot be read is reported as unknown.
@@ -84,7 +87,7 @@ func (s Survey) empty(src inventory.Source, sel inventory.Selection) bool {
 		return len(sel.Releases) == 0
 	}
 	if src == inventory.Archive {
-		return len(s.Archives) == 0
+		return len(s.Archives) == 0 && len(s.ArchiveSkips) == 0
 	}
 	return len(sel.Packages[src]) == 0
 }
@@ -192,6 +195,30 @@ func (s Survey) releases(ctx context.Context, rels []inventory.ReleaseSel) inven
 // archives reads the pinned archives: one row per distinct repository and commit,
 // with the commit its remote's HEAD points at, looked up once per remote.
 func (s Survey) archives(ctx context.Context) inventory.Group {
+	g := s.archiveRows(ctx)
+	if note := skipNote(s.ArchiveSkips); note != "" {
+		g.Note = strings.Join(slices.DeleteFunc([]string{g.Note, note}, func(n string) bool { return n == "" }), "; ")
+	}
+	return g
+}
+
+// skipNote lists the first few skipped externals with their reasons.
+func skipNote(skips []extpin.Skip) string {
+	if len(skips) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, k := range skips[:min(len(skips), maxSkipsShown)] {
+		parts = append(parts, cmp.Or(k.Entry, k.File)+": "+k.Reason)
+	}
+	note := fmt.Sprintf("skipped %d: %s", len(skips), strings.Join(parts, "; "))
+	if len(skips) > maxSkipsShown {
+		note += "; ..."
+	}
+	return note
+}
+
+func (s Survey) archiveRows(ctx context.Context) inventory.Group {
 	type pin struct{ name, sha string }
 	seen := map[pin]bool{}
 	var tools []inventory.Tool
