@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
+	"github.com/giocaizzi/chezmoi-dots/internal/edit"
 	"github.com/giocaizzi/chezmoi-dots/internal/finding"
 	"github.com/giocaizzi/chezmoi-dots/internal/registry"
 )
@@ -50,27 +52,73 @@ func (d Deps) add(ctx context.Context, args []string) error {
 		return err
 	}
 	if desc == "" {
-		if desc, err = d.askDesc(name); err != nil {
+		if desc, err = d.askDesc(ctx, name); err != nil {
 			return err
 		}
 	}
 
+	file := filepath.Join(src, ".chezmoidata", "edit.toml")
 	if where == "" { // unmanaged: name and description are settled, so chezmoi add now
-		if where, value, err = d.track(ctx, cz, src, abs, flagsFor(tmpl, encrypt)); err != nil {
+		if value, err = d.track(ctx, cz, src, file, abs, name, desc, flagsFor(tmpl, encrypt)); err != nil {
 			return err
 		}
+		return d.checkRegistry(ctx, cz, src, file, name, value)
 	}
+	if err = checkEntry(name, desc, where, value); err != nil {
+		return err
+	}
+	if err = writeEntry(file, name, desc, where, value); err != nil {
+		return err
+	}
+	if err = d.checkRegistry(ctx, cz, src, file, name, value); err != nil {
+		return err
+	}
+	// No chezmoi add ran, so chezmoi's own git automation did not: follow the same
+	// settings as edit for the registry file alone.
+	return d.commitRegistry(ctx, cz, file)
+}
+
+// checkEntry rejects an entry the registry would not accept.
+func checkEntry(name, desc, where, value string) error {
 	probe := map[string]any{"edit": map[string]any{name: map[string]any{"desc": desc, where: value}}}
 	if _, bad := registry.Parse(probe); len(bad) > 0 {
 		return fmt.Errorf("invalid registry entry:\n%s", finding.Lines(bad))
 	}
+	return nil
+}
 
-	file := filepath.Join(src, ".chezmoidata", "edit.toml")
-	if err = writeEntry(file, name, desc, where, value); err != nil {
-		return err
+// commitRegistry stages, commits and pushes only the registry file as far as the
+// chezmoi git settings ask, as edit does for a source file.
+func (d Deps) commitRegistry(ctx context.Context, cz *chez.Client, file string) error {
+	cfg, err := cz.EditConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("read the chezmoi git settings: %w", err)
 	}
-
-	return d.checkRegistry(ctx, cz, src, file, name, value)
+	g := cfg.Git
+	if (!g.AutoAdd && !g.AutoCommit && !g.AutoPush) || cfg.WorkingTree == "" {
+		return nil
+	}
+	rel, err := filepath.Rel(cfg.WorkingTree, file)
+	if err != nil || !filepath.IsLocal(rel) {
+		return fmt.Errorf("registry file %s is outside the Git working tree %s", file, cfg.WorkingTree)
+	}
+	rel = filepath.ToSlash(rel)
+	git := edit.ExecGit{Runner: d.Runner}
+	if err = git.Stage(ctx, cfg.WorkingTree, rel); err != nil {
+		return fmt.Errorf("stage %q: %w", rel, err)
+	}
+	if !g.AutoCommit && !g.AutoPush {
+		return nil
+	}
+	if err = git.Commit(ctx, cfg.WorkingTree, rel); err != nil {
+		return fmt.Errorf("commit %q: %w", rel, err)
+	}
+	if g.AutoPush {
+		if err = git.Push(ctx, cfg.WorkingTree); err != nil {
+			return fmt.Errorf("push Git changes (commit kept locally): %w", err)
+		}
+	}
+	return nil
 }
 
 // checkAddArgs rejects command lines add cannot act on.
@@ -184,10 +232,14 @@ func (d Deps) addTarget(ctx context.Context, cz *chez.Client, reg registry.Regis
 		return "local", rel, "", nil
 	}
 
+	info, statErr := os.Stat(abs)
+	if statErr == nil && info.IsDir() {
+		return "", "", "", fmt.Errorf("%w: %s is a folder; use --local to register a folder, or add one file", ErrUsage, abs)
+	}
 	sp, serr := cz.SourcePath(ctx, abs, nil)
 	if serr != nil {
-		if _, err = os.Stat(abs); err != nil {
-			return "", "", "", fmt.Errorf("add %s: %w", abs, err)
+		if statErr != nil {
+			return "", "", "", fmt.Errorf("add %s: %w", abs, statErr)
 		}
 		return "", "", "", nil
 	}
@@ -204,17 +256,70 @@ func (d Deps) addTarget(ctx context.Context, cz *chez.Client, reg registry.Regis
 	return "source", rel, "", nil
 }
 
-// track runs chezmoi add for an unmanaged file and returns its source entry.
-func (d Deps) track(ctx context.Context, cz *chez.Client, src, abs string, flags []string) (where, value string, err error) {
+// track registers an unmanaged file, then runs chezmoi add and returns its source
+// path. The entry is written first so that chezmoi's git automation, which runs
+// inside chezmoi add, commits and pushes the source file together with its entry.
+func (d Deps) track(ctx context.Context, cz *chez.Client, src, file, abs, name, desc string, flags []string) (string, error) {
+	planned, err := cz.AddPlan(ctx, abs, flags...)
+	if err != nil {
+		return "", err
+	}
+	if err = checkEntry(name, desc, "source", planned); err != nil {
+		return "", err
+	}
+	old, existed, err := readRegistry(file)
+	if err != nil {
+		return "", err
+	}
+	if err = writeEntry(file, name, desc, "source", planned); err != nil {
+		return "", err
+	}
 	if err = cz.Add(ctx, d.Stderr, d.Stderr, abs, flags...); err != nil {
-		return "", "", err
+		return "", errors.Join(err, restoreRegistry(file, old, existed))
 	}
 	sp, err := cz.SourcePath(ctx, abs, nil)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	rel, err := sourceRel(src, sp)
-	return "source", rel, err
+	if err != nil {
+		return "", err
+	}
+	if rel != planned {
+		return "", fmt.Errorf("the entry %s was written for %s but chezmoi created %s; fix %s", name, planned, rel, file)
+	}
+	return rel, nil
+}
+
+// readRegistry returns the registry file's bytes and whether it exists.
+func readRegistry(file string) (old []byte, existed bool, err error) {
+	old, err = os.ReadFile(file) //nolint:gosec // the user's own source dir
+	switch {
+	case err == nil:
+		return old, true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, false, nil
+	default:
+		return nil, false, fmt.Errorf("read %s: %w", file, err)
+	}
+}
+
+// restoreRegistry puts the registry file back as it was before the entry.
+func restoreRegistry(file string, old []byte, existed bool) error {
+	if !existed {
+		if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove %s: %w", file, err)
+		}
+		return nil
+	}
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(file); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := os.WriteFile(file, old, mode); err != nil {
+		return fmt.Errorf("restore %s: %w", file, err)
+	}
+	return nil
 }
 
 // sourceRel is sp relative to the source dir, with forward slashes.
@@ -239,7 +344,7 @@ func localFolder(p string) (string, error) {
 }
 
 // askDesc prompts for a description on a terminal; elsewhere --desc is required.
-func (d Deps) askDesc(name string) (string, error) {
+func (d Deps) askDesc(ctx context.Context, name string) (string, error) {
 	f, ok := d.Stdin.(*os.File)
 	if !ok {
 		return "", fmt.Errorf("%w: --desc is required when stdin is not a terminal", ErrUsage)
@@ -249,15 +354,39 @@ func (d Deps) askDesc(name string) (string, error) {
 		return "", fmt.Errorf("%w: --desc is required when stdin is not a terminal", ErrUsage)
 	}
 	_, _ = fmt.Fprintf(d.Stderr, "Description for %s: ", name)
-	line, err := bufio.NewReader(f).ReadString('\n')
-	if err != nil && line == "" {
-		return "", errors.New("read the description: " + err.Error())
+	line, err := readLine(ctx, f)
+	if err != nil {
+		return "", err
 	}
 	desc := strings.TrimSpace(line)
 	if desc == "" {
 		return "", errors.New("the description is empty")
 	}
 	return desc, nil
+}
+
+// readLine reads one line from r, or returns when ctx is cancelled. A blocked read
+// cannot be interrupted, so its goroutine ends with the process the caller is about
+// to exit, or when r yields.
+func readLine(ctx context.Context, r io.Reader) (string, error) {
+	type result struct {
+		line string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		line, err := bufio.NewReader(r).ReadString('\n')
+		ch <- result{line, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", fmt.Errorf("read the description: %w", ctx.Err())
+	case res := <-ch:
+		if res.err != nil && res.line == "" {
+			return "", fmt.Errorf("read the description: %w", res.err)
+		}
+		return res.line, nil
+	}
 }
 
 // writeEntry appends the entry to the registry file, creating it when missing and

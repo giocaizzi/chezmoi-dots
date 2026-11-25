@@ -98,17 +98,31 @@ chezmoi dots add [--name <name>] [--desc <text>] [--template] [--encrypt] [--loc
 
 Bring a file under chezmoi and register it in the edit registry in one step.
 `path` is a target path: `~/` expands to the home directory and relative paths
-resolve from the current directory. If chezmoi does not manage it yet, `add`
-runs `chezmoi add` (forwarding `--template` and `--encrypt`), then appends an
-`[edit.<name>]` entry with `desc` and `source` to `.chezmoidata/edit.toml` and
-validates the whole registry. Findings exit 1 and the entry is kept.
+resolve from the current directory. A folder is rejected (usage error, exit 2)
+before anything changes: use `--local` to register a folder, or add one file.
+If chezmoi does not manage the file yet, `add` asks `chezmoi add` (dry run) which
+source file it would create, appends the `[edit.<name>]` entry with `desc` and
+`source` to `.chezmoidata/edit.toml`, and only then runs the real `chezmoi add`
+(forwarding `--template` and `--encrypt`). The entry comes first so that
+chezmoi's `git.autoAdd`, `git.autoCommit` and `git.autoPush` commit and push the
+source file and its entry together; as with every `chezmoi add`, that automation
+stages every pending change in the source. If `chezmoi add` fails, the registry
+file is restored. Afterwards `add` validates the whole registry; findings exit 1
+and the entry is kept.
+
+Registering a file chezmoi already manages, or a `--local` folder, runs no
+`chezmoi add`, so `add` follows the same git settings as `edit`: with
+`git.autoAdd`, `git.autoCommit` or `git.autoPush` it stages only
+`.chezmoidata/edit.toml`, with `autoCommit` or `autoPush` it commits only that
+file, and with `autoPush` it pushes (a push failure keeps the commit and exits
+non-zero).
 
 - `--name <name>`: registry name. Without it the name is inferred from the file
   name: leading dots and the extension are dropped and the result is lowercased.
   On a collision the name becomes `<parent>-<name>`; if that collides too, pass
   `--name`.
-- `--desc <text>`: entry description. Prompted for on a terminal; required
-  otherwise (a usage error, exit 2).
+- `--desc <text>`: entry description. Prompted for on a terminal (Ctrl-C at the
+  prompt cancels, exit 130); required otherwise (a usage error, exit 2).
 - `--template`, `--encrypt`: forwarded to `chezmoi add`. Both are errors on a
   file chezmoi already manages.
 - `--local`: register the folder (a file's parent folder) under the home
@@ -280,9 +294,9 @@ releases. No positional arguments. All options default to false:
 - `--check`: fail (exit 1) if anything is outdated, drifted or not installed.
 - `-h`, `--help`: local help.
 
-Git operations never prompt for credentials (`GIT_TERMINAL_PROMPT=0`). `--fetch`
-uses `ssh -o BatchMode=yes` unless you set `GIT_SSH_COMMAND`, `GIT_SSH` or
-`core.sshCommand`. A missing `winget` or `uv` is reported as not installed.
+Git operations never prompt for credentials: both `git ls-remote` (release
+lookups) and `--fetch` run with `GIT_TERMINAL_PROMPT=0` and `ssh -o BatchMode=yes`
+unless you set `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand`. A missing `winget` or `uv` is reported as not installed.
 Ctrl-C exits 130.
 
 Environment: shared settings; `CHEZMOI_WORKING_TREE` overrides working-tree
