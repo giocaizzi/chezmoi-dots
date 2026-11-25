@@ -36,6 +36,13 @@
 
    Review the change to `.chezmoidata/packages.toml` and to any externals file, then commit and push it in the dotfiles repository (`chezmoi git -- diff`, `chezmoi git -- commit`, `chezmoi git -- push`). On each machine run `chezmoi apply`, or `chezmoi dots upgrade dotfiles` to pull and apply. `pkg bump` never installs anything.
 
+   To start tracking a new tool, `pkg add` appends it to `.chezmoidata/packages.toml` and validates the registry; preview with `--dry-run`. See [pkg add](cli.md#pkg-add).
+
+   ```sh
+   chezmoi dots pkg add wget --brew --apt
+   chezmoi dots pkg add example-tool --release --version 1.2.3 --url 'https://example.com/{version}/tool-{target}.tar.gz' --target linux/amd64=linux-x86_64
+   ```
+
 5. CI. The checks exit 1 on findings and can gate a pipeline.
 
    ```sh
