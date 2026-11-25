@@ -290,3 +290,19 @@ func TestMap(t *testing.T) {
 		})
 	}
 }
+
+// TestMapVersionOnlyInWholeTokens: the version is templated only where it is a whole
+// name token, so a version that also occurs inside the tool name ("tool2", tag v2)
+// still gives a URL that holds for the next version.
+func TestMapVersionOnlyInWholeTokens(t *testing.T) {
+	t.Parallel()
+	t.Skip("xfail: Map replaces every occurrence of the version, so tool2 becomes tool{version} and pkg bump to v3 downloads tool3-...")
+	p, err := Map("octocat/tool2", release("v2", "tool2-linux-amd64.tar.gz", "tool2-darwin-arm64.tar.gz"))
+	if err != nil {
+		return // refusing the release is safe
+	}
+	got := strings.NewReplacer("{version}", "3", "{target}", p.Targets["linux/amd64"]).Replace(p.URL)
+	if want := dl + "v3/tool2-linux-amd64.tar.gz"; got != want {
+		t.Errorf("URL %q at version 3 = %q, want %q", p.URL, got, want)
+	}
+}

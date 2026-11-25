@@ -410,3 +410,31 @@ func FuzzScanSet(f *testing.F) {
 		}
 	})
 }
+
+// TestScanEquivalentHeaderKeys: TOML reads the bare, "basic" and 'literal' forms of
+// a key as one key, so a checksum subtable written in another form still belongs
+// to its entry; a bump must not leave its sha256 stale.
+func TestScanEquivalentHeaderKeys(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, entry, sub string }{
+		{"bare entry, basic subtable", `[tool]`, `["tool".checksum]`},
+		{"basic entry, literal subtable", `[".vim/x"]`, `['.vim/x'.checksum]`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			t.Skip("xfail: Scan compares header keys as written, so the subtable starts a new entry and the bump leaves the old sha256")
+			text := tt.entry + "\nurl = \"" + ghURL + "\"\n" + tt.sub + "\nsha256 = \"" + sumA + "\"\n"
+			pins, _ := Scan("f", text)
+			for _, p := range pins {
+				got, err := Set(text, p, sha2, sumB)
+				if err != nil {
+					continue // refusing the pin is safe
+				}
+				if strings.Contains(got, sumA) {
+					t.Errorf("Set(%s) left the old sha256:\n%s", p.Entry, got)
+				}
+			}
+		})
+	}
+}
