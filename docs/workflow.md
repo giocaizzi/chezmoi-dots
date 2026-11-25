@@ -26,7 +26,7 @@
    chezmoi dots upgrade
    ```
 
-4. Keep pins current. Survey, bump, review, publish, then apply on each machine.
+4. Keep pins current: release pins in `.chezmoidata/packages.toml` and commit-pinned archive externals in `.chezmoiexternal` files. Survey, bump, review, publish, then apply on each machine.
 
    ```sh
    chezmoi dots pkg status
@@ -34,7 +34,7 @@
    chezmoi dots pkg bump
    ```
 
-   Review the change to `.chezmoidata/packages.toml`, then commit and push it in the dotfiles repository (`chezmoi git -- diff`, `chezmoi git -- commit`, `chezmoi git -- push`). On each machine run `chezmoi apply`, or `chezmoi dots upgrade dotfiles` to pull and apply. `pkg bump` never installs anything.
+   Review the change to `.chezmoidata/packages.toml` and to any externals file, then commit and push it in the dotfiles repository (`chezmoi git -- diff`, `chezmoi git -- commit`, `chezmoi git -- push`). On each machine run `chezmoi apply`, or `chezmoi dots upgrade dotfiles` to pull and apply. `pkg bump` never installs anything.
 
 5. CI. The checks exit 1 on findings and can gate a pipeline.
 

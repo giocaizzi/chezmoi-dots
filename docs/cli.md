@@ -15,7 +15,7 @@ Examples below use `chezmoi dots`; `dots` also works if you define that alias.
 | `upgrade` | `[<step>...]` | Run system and dotfiles upgrades |
 | `lint` | `[<check>...]` | Validate registries and templates |
 | `audit` | `[<check>...]` | Audit live machine state against the registries |
-| `pkg` | `status`, `bump` | Survey and update pinned packages and releases |
+| `pkg` | `status`, `bump` | Survey and update pinned packages, releases and archive externals |
 | `version` | none | Print the binary version |
 | `help` | `[<command> [<subcommand>]]` | Show root or local help |
 
@@ -108,9 +108,11 @@ source file it would create, appends the `[edit.<name>]` entry with `desc` and
 chezmoi's `git.autoAdd`, `git.autoCommit` and `git.autoPush` commit and push the
 source file and its entry together; as with every `chezmoi add`, that automation
 stages every pending change in the source. If `chezmoi add` fails before it
-created the source file, the registry file is restored; if it failed afterwards
-(for example a failed `git.autoPush` after the commit), the entry stays with the
-added file. Afterwards `add` validates the whole registry; findings exit 1
+created the source file, the registry file is restored. If it failed afterwards
+(for example a failed `git.autoPush` after the commit), `add` keeps the entry,
+exits non-zero with chezmoi's error (naming the added file and the kept entry)
+and skips the registry validation; run `chezmoi dots lint registry` afterwards.
+When `chezmoi add` succeeded, `add` validates the whole registry; findings exit 1
 and the entry is kept.
 
 Registering a file chezmoi already manages, or a `--local` folder, runs no
@@ -288,22 +290,41 @@ chezmoi dots pkg status [--offline] [--fetch] [--check]
 Survey tools on this machine, comparing installed versions, pins and upstream
 releases. No positional arguments. All options default to false:
 
-- `--offline`: skip upstream release lookups, `uv` and `npm` latest lookups and
+- `--offline`: skip upstream release and archive HEAD lookups, `uv` and `npm` latest lookups and
   the Git fetch. For pinned npm packages (including the `npm view` lookup) the
   latest is the newest version inside the pin. `brew` and `apt` still report
   latest from their local package index, and version commands or
   `winget export` may still use the network.
 - `--fetch`: fetch the dotfiles Git working tree before evaluating it.
-- `--check`: fail (exit 1) if anything is outdated, drifted or not installed.
+- `--check`: fail (exit 1) if anything is outdated, drifted or not installed,
+  including an outdated pinned archive.
 - `-h`, `--help`: local help.
 
-Git operations never prompt for credentials: both `git ls-remote` (release
-lookups) and `--fetch` run with `GIT_TERMINAL_PROMPT=0` and `ssh -o BatchMode=yes`
+Git operations never prompt for credentials: both `git ls-remote` (release and
+archive HEAD lookups) and `--fetch` run with `GIT_TERMINAL_PROMPT=0` and `ssh -o BatchMode=yes`
 unless you set `GIT_SSH_COMMAND`, `GIT_SSH` or `core.sshCommand`. A missing `winget` or `uv` is reported as not installed.
 Ctrl-C exits 130.
 
 Environment: shared settings; `CHEZMOI_WORKING_TREE` overrides working-tree
 discovery through chezmoi. Package-manager discovery uses `PATH`.
+
+A "Pinned archives" table (columns TOOL, PINNED, LATEST, STATE; commits shown as
+7 characters) lists every external in the source's TOML externals files
+(`.chezmoiexternal.toml`, `.chezmoiexternal.toml.tmpl`, and `.toml` or
+`.toml.tmpl` files in `.chezmoiexternals/` directories) whose URL is a commit
+archive: GitHub `https://github.com/<owner>/<repo>/archive/<sha>.tar.gz` or
+GitLab-shaped `https://<host>/<group>/<repo>/-/archive/<sha>/<repo>-<sha>.tar.gz`,
+where `<sha>` is a full 40-hex commit. The row's name is the repository path
+(`octocat/example`). Latest is the commit `git ls-remote <repo> HEAD` reports
+(the default branch head); the pin is outdated when the two differ.
+
+Limits: only TOML externals files; the URL must be written literally (a commit or
+host coming from a template expression is not recognised); an entry with more
+than one archive URL or more than one `sha256` (for example per-OS template
+branches) is skipped; only the default branch HEAD is compared (no tags or other
+branches); archives are listed from the whole source regardless of this
+machine's OS or role; the installed copy is not inspected (`chezmoi apply`
+installs the pin).
 
 ```sh
 chezmoi dots pkg status --offline
@@ -316,11 +337,22 @@ chezmoi dots pkg status --fetch --check
 chezmoi dots pkg bump [--dry-run] [<pin>...]
 ```
 
-Select pin names from `.chezmoidata/packages.toml`, or all configured pins by
-default. Fetch newer upstream versions and checksums, then update the pins in
-that file. It edits only that file and never installs anything; commit the
-change and run `chezmoi apply` to install. Options: `--dry-run` (false; fetch
-and report changes without writing), `-h`, `--help`. Environment: shared
+`<pin>` is a release name from `.chezmoidata/packages.toml` or an archive
+repository path (`octocat/example`); with no names, everything. Fetch newer
+upstream versions and checksums, then update the pins. It edits
+`.chezmoidata/packages.toml` and/or the externals files and never installs
+anything; commit the change and run `chezmoi apply` to install.
+
+For each outdated archive pin (recognition and limits are in
+[pkg status](#pkg-status)) it replaces the commit in the URL (both places in a
+GitLab URL), downloads the new archive and writes its SHA-256 into the entry's
+`sha256` checksum (`checksum.sha256 = "..."`, a `[<entry>.checksum]` subtable, or
+an inline `checksum = { sha256 = ... }`), editing the externals file in place as
+text (templates and comments are kept). An entry without a checksum gets only the
+URL rewritten. Output is one line per pin, `<name> <old7> → <new7>`; when nothing
+is outdated it prints `all pins are up to date`.
+
+Options: `--dry-run` (false; download and report changes without writing), `-h`, `--help`. Environment: shared
 chezmoi and output settings; network access is needed even for a dry run.
 
 ```sh
