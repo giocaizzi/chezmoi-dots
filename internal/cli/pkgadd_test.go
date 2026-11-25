@@ -956,7 +956,6 @@ func TestPkgAddPrintsHelpPage(t *testing.T) {
 
 func TestPkgAddBrewFalseIsNotAFormula(t *testing.T) {
 	t.Parallel()
-	t.Skip(`xfail: --brew=false (a bool flag form) is read as the formula "false"`)
 	e := newPkgAddEnv(t, pkgAddOldText, `{}`)
 	if err := e.run(t, "wget", "--brew=false", "--apt", "--dry-run"); err != nil {
 		return // a usage error is fine

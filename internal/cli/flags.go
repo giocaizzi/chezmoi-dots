@@ -57,7 +57,7 @@ func newFlags(name string) *flag.FlagSet {
 }
 
 // optValue is a flag whose value is optional: bare, it stands for the package name;
-// with =<value>, for that value.
+// with =<value>, for that value; =true is the bare form and =false leaves it unset.
 type optValue struct {
 	set bool
 	val string
@@ -74,10 +74,14 @@ func (o *optValue) Set(v string) error {
 	if v == "" {
 		return errors.New("needs a value after =")
 	}
-	o.set = true
 	o.val = ""
-	if v != "true" { // the flag package passes "true" for the bare form
-		o.val = v
+	switch v {
+	case "false": // the boolean form: the flag is off
+		o.set = false
+	case "true": // the flag package passes "true" for the bare form
+		o.set = true
+	default:
+		o.set, o.val = true, v
 	}
 	return nil
 }
