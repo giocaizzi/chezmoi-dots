@@ -58,7 +58,7 @@ lookup:
 ```sh
 "$HOME/.local/bin/chezmoi-dots" version
 "$HOME/.local/bin/chezmoi-dots" --help
-"$HOME/.local/bin/chezmoi-dots" help audit aliases
+"$HOME/.local/bin/chezmoi-dots" help pkg status
 command -v chezmoi-dots
 chezmoi-dots version
 chezmoi-dots help view
