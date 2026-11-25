@@ -228,6 +228,12 @@ func (c *Client) Apply(ctx context.Context, stdout, stderr io.Writer, targets ..
 	return c.stream(ctx, stdout, stderr, nil, append([]string{"apply"}, targets...)...)
 }
 
+// Add adds target to the source state; flags (--template, --encrypt) go before it.
+func (c *Client) Add(ctx context.Context, stdout, stderr io.Writer, target string, flags ...string) error {
+	sub := append(append([]string{"add"}, flags...), target)
+	return c.stream(ctx, stdout, stderr, nil, sub...)
+}
+
 // Encrypt encrypts plain with the configured encryption, armored as chezmoi writes it.
 func (c *Client) Encrypt(ctx context.Context, plain []byte) ([]byte, error) {
 	return c.output(ctx, nil, bytes.NewReader(plain), "encrypt")
