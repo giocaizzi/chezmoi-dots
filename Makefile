@@ -2,10 +2,12 @@
 GOLANGCI := go tool -modfile=golangci-lint.mod golangci-lint
 LINT_GOOS ?= linux darwin windows
 
+include help-tests.mk
+
 .PHONY: help fmt lint vuln test check check-fast build install readme-images
 
 help: ## List targets
-	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "%-14s %s\n", $$1, $$2}'
+	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "%-18s %s\n", $$1, $$2}'
 
 fmt: ## Format, tidy and apply modernizers
 	go mod tidy
