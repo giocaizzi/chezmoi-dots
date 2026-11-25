@@ -16,6 +16,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
+	"github.com/giocaizzi/chezmoi-dots/internal/extpin"
 	"github.com/giocaizzi/chezmoi-dots/internal/inventory"
 	"github.com/giocaizzi/chezmoi-dots/internal/pkgreg"
 )
@@ -625,5 +626,127 @@ func TestTreeFetchKeepsUsersSSH(t *testing.T) {
 				t.Errorf("env (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func archivePin(repo, sha string) extpin.Pin {
+	return extpin.Pin{Host: "github.com", Repo: repo, SHA: sha}
+}
+
+// headFake answers Head by remote and records the calls and their deadlines.
+type headFake struct {
+	mu        sync.Mutex
+	heads     map[string]string
+	calls     []string
+	noTimeout bool
+}
+
+func (h *headFake) Head(ctx context.Context, remote string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, remote)
+	if _, ok := ctx.Deadline(); !ok {
+		h.noTimeout = true
+	}
+	head, ok := h.heads[remote]
+	if !ok {
+		return "", errors.New("no such remote")
+	}
+	return head, nil
+}
+
+func TestArchives(t *testing.T) {
+	t.Parallel()
+	sha := func(c byte) string { return strings.Repeat(string(c), 40) }
+	const remoteA = "https://github.com/octocat/a.git"
+	const remoteB = "https://github.com/octocat/b.git"
+	pins := []extpin.Pin{
+		archivePin("octocat/b", sha('1')),
+		archivePin("octocat/a", sha('1')),
+		archivePin("octocat/a", sha('1')), // the same pin in a second file
+		archivePin("octocat/a", sha('2')), // the same repo at another commit
+	}
+	tests := []struct {
+		name      string
+		offline   bool
+		heads     map[string]string
+		nilHead   bool
+		wantNote  string
+		wantTools []inventory.Tool
+		wantCalls []string
+	}{
+		{
+			name:     "dedupes and looks up each remote once",
+			heads:    map[string]string{remoteA: sha('2'), remoteB: sha('1')},
+			wantNote: "",
+			wantTools: []inventory.Tool{
+				{Name: "octocat/a", Pinned: sha('1'), Latest: sha('2')},
+				{Name: "octocat/a", Pinned: sha('2'), Latest: sha('2')},
+				{Name: "octocat/b", Pinned: sha('1'), Latest: sha('1')},
+			},
+			wantCalls: []string{remoteA, remoteB},
+		},
+		{
+			name:     "offline looks nothing up",
+			offline:  true,
+			heads:    map[string]string{remoteA: sha('2'), remoteB: sha('1')},
+			wantNote: offlineNote,
+			wantTools: []inventory.Tool{
+				{Name: "octocat/a", Pinned: sha('1')},
+				{Name: "octocat/a", Pinned: sha('2')},
+				{Name: "octocat/b", Pinned: sha('1')},
+			},
+		},
+		{
+			name:     "a failing lookup leaves latest unknown",
+			heads:    map[string]string{remoteB: sha('1')},
+			wantNote: "latest unknown for 2 (no network or lookup failed)",
+			wantTools: []inventory.Tool{
+				{Name: "octocat/a", Pinned: sha('1')},
+				{Name: "octocat/a", Pinned: sha('2')},
+				{Name: "octocat/b", Pinned: sha('1'), Latest: sha('1')},
+			},
+			wantCalls: []string{remoteA, remoteB},
+		},
+		{
+			name:     "no Head counts as failure",
+			nilHead:  true,
+			wantNote: "latest unknown for 3 (no network or lookup failed)",
+			wantTools: []inventory.Tool{
+				{Name: "octocat/a", Pinned: sha('1')},
+				{Name: "octocat/a", Pinned: sha('2')},
+				{Name: "octocat/b", Pinned: sha('1')},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := &headFake{heads: tt.heads}
+			s := base(newRunner(nil))
+			s.Archives, s.Offline = pins, tt.offline
+			if !tt.nilHead {
+				s.Head = h.Head
+			}
+			rep := s.Run(t.Context(), inventory.Selection{})
+			checkGroup(t, group(t, rep, inventory.Archive), tt.wantNote, tt.wantTools)
+			slices.Sort(h.calls)
+			if diff := cmp.Diff(tt.wantCalls, h.calls); diff != "" {
+				t.Errorf("Head calls (-want +got):\n%s", diff)
+			}
+			if h.noTimeout {
+				t.Error("Head ran without a timeout context")
+			}
+		})
+	}
+}
+
+func TestNoArchivesNoGroup(t *testing.T) {
+	t.Parallel()
+	rep := base(newRunner(nil)).Run(t.Context(), inventory.Selection{})
+	for _, g := range rep.Groups {
+		if g.Source == inventory.Archive {
+			t.Errorf("unexpected archive group %v", g)
+		}
 	}
 }

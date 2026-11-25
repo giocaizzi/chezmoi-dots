@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
+	"github.com/giocaizzi/chezmoi-dots/internal/extpin"
 	"github.com/giocaizzi/chezmoi-dots/internal/inventory"
 	"github.com/giocaizzi/chezmoi-dots/internal/pkgreg"
 )
@@ -37,6 +38,8 @@ const (
 type Survey struct {
 	Runner      chez.Runner
 	Latest      func(context.Context, pkgreg.Upstream) (string, error) // release.Finder.Latest
+	Archives    []extpin.Pin                                           // commit-pinned archive externals
+	Head        func(context.Context, string) (string, error)          // release.Finder.Head: the commit HEAD of a remote points at
 	Stat        func(string) (fs.FileInfo, error)                      // os.Stat
 	LookPath    func(string) (string, error)
 	Getenv      func(string) string // nil reads nothing
@@ -56,7 +59,7 @@ func (s Survey) Run(ctx context.Context, sel inventory.Selection) inventory.Repo
 	groups := make([]*inventory.Group, len(srcs))
 	var wg sync.WaitGroup
 	for i, src := range srcs {
-		if src == inventory.Release && len(sel.Releases) == 0 || src != inventory.Release && len(sel.Packages[src]) == 0 {
+		if s.empty(src, sel) {
 			continue
 		}
 		wg.Go(func() {
@@ -75,11 +78,24 @@ func (s Survey) Run(ctx context.Context, sel inventory.Selection) inventory.Repo
 	return rep
 }
 
+// empty reports whether src has nothing to survey.
+func (s Survey) empty(src inventory.Source, sel inventory.Selection) bool {
+	if src == inventory.Release {
+		return len(sel.Releases) == 0
+	}
+	if src == inventory.Archive {
+		return len(s.Archives) == 0
+	}
+	return len(sel.Packages[src]) == 0
+}
+
 func (s Survey) group(ctx context.Context, src inventory.Source, sel inventory.Selection) inventory.Group {
 	pkgs := sel.Packages[src]
 	switch src {
 	case inventory.Release:
 		return s.releases(ctx, sel.Releases)
+	case inventory.Archive:
+		return s.archives(ctx)
 	case inventory.Brew:
 		return s.brew(ctx, pkgs)
 	case inventory.Apt:
@@ -169,6 +185,61 @@ func (s Survey) releases(ctx context.Context, rels []inventory.ReleaseSel) inven
 		g.Note = homeUnknownNote
 	case n > 0:
 		g.Note = fmt.Sprintf(unknownLatestFn, n)
+	}
+	return g
+}
+
+// archives reads the pinned archives: one row per distinct repository and commit,
+// with the commit its remote's HEAD points at, looked up once per remote.
+func (s Survey) archives(ctx context.Context) inventory.Group {
+	type pin struct{ name, sha string }
+	seen := map[pin]bool{}
+	var tools []inventory.Tool
+	var toolRemote []string // the remote of tools[i]
+	var remotes []string    // the distinct remotes
+	for _, p := range s.Archives {
+		k := pin{p.Name(), p.SHA}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		tools = append(tools, inventory.Tool{Name: p.Name(), Pinned: p.SHA})
+		toolRemote = append(toolRemote, p.Remote())
+		if !slices.Contains(remotes, p.Remote()) {
+			remotes = append(remotes, p.Remote())
+		}
+	}
+	if s.Offline {
+		return inventory.Group{Tools: sorted(tools), Note: offlineNote}
+	}
+	heads := make([]string, len(remotes)) // "" when the lookup failed
+	sem := make(chan struct{}, releaseLookups)
+	var wg sync.WaitGroup
+	for i, remote := range remotes {
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if s.Head == nil {
+				return
+			}
+			lctx, cancel := context.WithTimeout(ctx, s.net())
+			defer cancel()
+			if head, err := s.Head(lctx, remote); err == nil {
+				heads[i] = head
+			}
+		})
+	}
+	wg.Wait()
+	failed := 0
+	for i := range tools {
+		tools[i].Latest = heads[slices.Index(remotes, toolRemote[i])]
+		if tools[i].Latest == "" {
+			failed++
+		}
+	}
+	g := inventory.Group{Tools: sorted(tools)}
+	if failed > 0 {
+		g.Note = fmt.Sprintf(unknownLatestFn, failed)
 	}
 	return g
 }

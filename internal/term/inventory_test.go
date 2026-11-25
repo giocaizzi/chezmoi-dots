@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +28,11 @@ func richReport() inventory.Report {
 				{Name: "gitleaks", Installed: "8.28.0", Pinned: "8.28.0", Latest: "8.30.0"},
 				{Name: "shfmt", Missing: true, Pinned: "3.12.0", Latest: "3.12.0"},
 			}},
+			{Source: inventory.Archive, Tools: []inventory.Tool{
+				{Name: "octocat/example", Pinned: strings.Repeat("a", 40), Latest: strings.Repeat("b", 40)},
+				{Name: "octocat/stable", Pinned: strings.Repeat("c", 40), Latest: strings.Repeat("c", 40)},
+				{Name: "octocat/offline", Pinned: strings.Repeat("d", 40)},
+			}, Note: "latest unknown for 1 (no network or lookup failed)"},
 			{Source: inventory.Brew, Tools: []inventory.Tool{
 				{Name: "fd", ID: "fd-find", Installed: "10.2.0", Latest: "10.3.0"},
 				{Name: "jq", Installed: "1.8.1", Latest: "1.8.1"},
@@ -91,6 +97,30 @@ func TestInventoryClean(t *testing.T) {
 		"  jq    1          1       ✓ up to date\n\n" +
 		"source  not a git checkout\n" +
 		"summary 1 tools · 1 up to date\n"
+	if diff := cmp.Diff(want, buf.String()); diff != "" {
+		t.Errorf("Inventory() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestInventoryArchives(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	Style{}.Inventory(&buf, inventory.Report{
+		OS: "linux", Role: "light",
+		Groups: []inventory.Group{{Source: inventory.Archive, Tools: []inventory.Tool{
+			{Name: "octocat/example", Pinned: strings.Repeat("a", 40), Latest: strings.Repeat("b", 40)},
+			{Name: "octocat/offline", Pinned: strings.Repeat("c", 40)},
+		}}},
+	}, now)
+	want := "chezmoi dots pkg status — every tool on this machine   linux · light · online\n\n" +
+		"Pinned archives (2)\n" +
+		"  TOOL             PINNED   LATEST   STATE\n" +
+		"  octocat/example  aaaaaaa  bbbbbbb  ↑ outdated\n" +
+		"  octocat/offline  ccccccc  unknown  ? unknown\n\n" +
+		"source  not a git checkout\n" +
+		"summary 2 tools · 1 outdated · 1 unknown\n\n" +
+		"next\n" +
+		"  chezmoi dots pkg bump octocat/example  pin the newer commit\n"
 	if diff := cmp.Diff(want, buf.String()); diff != "" {
 		t.Errorf("Inventory() mismatch (-want +got):\n%s", diff)
 	}
