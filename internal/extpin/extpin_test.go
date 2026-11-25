@@ -423,7 +423,6 @@ func TestScanEquivalentHeaderKeys(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			t.Skip("xfail: Scan compares header keys as written, so the subtable starts a new entry and the bump leaves the old sha256")
 			text := tt.entry + "\nurl = \"" + ghURL + "\"\n" + tt.sub + "\nsha256 = \"" + sumA + "\"\n"
 			pins, _ := Scan("f", text)
 			for _, p := range pins {

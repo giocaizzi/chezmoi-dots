@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -57,6 +58,7 @@ var (
 // entry collects what one TOML table holds while Scan walks the lines.
 type entry struct {
 	key    string
+	segs   []string // the key's dotted segments, unquoted
 	urls   []Pin
 	sums   []string
 	lines  []int    // lines of sums
@@ -91,33 +93,57 @@ func (e *entry) result() (*Pin, *Skip) {
 
 // parseHeader reads a TOML table header line (not an array of tables), allowing
 // spaces inside the brackets and around dots and a trailing comment. The key it
-// returns has the whitespace outside quotes removed.
-func parseHeader(line string) (string, bool) {
+// returns has the whitespace outside quotes removed; segs are its dotted-key
+// segments with quotes and escapes resolved, so equivalent spellings match.
+func parseHeader(line string) (key string, segs []string, ok bool) {
 	s := strings.TrimSpace(line)
 	if !strings.HasPrefix(s, "[") || strings.HasPrefix(s, "[[") {
-		return "", false
+		return "", nil, false
 	}
-	var key strings.Builder
+	var text, seg strings.Builder
 	for i := 1; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == '"' || c == '\'':
 			end := quotedEnd(s, i)
 			if end < 0 {
-				return "", false
+				return "", nil, false
 			}
-			key.WriteString(s[i : end+1])
+			text.WriteString(s[i : end+1])
+			seg.WriteString(unquoteKey(s[i : end+1]))
 			i = end
 		case c == ' ' || c == '\t':
 		case c == ']':
 			rest := strings.TrimSpace(s[i+1:])
-			return key.String(), key.Len() > 0 && (rest == "" || rest[0] == '#')
-		case c == '.' || c == '_' || c == '-' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
-			key.WriteByte(c)
+			segs = append(segs, seg.String())
+			return text.String(), segs, text.Len() > 0 && (rest == "" || rest[0] == '#')
+		case c == '.':
+			text.WriteByte(c)
+			segs = append(segs, seg.String())
+			seg.Reset()
+		case c == '_' || c == '-' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
+			text.WriteByte(c)
+			seg.WriteByte(c)
 		default:
-			return "", false
+			return "", nil, false
 		}
 	}
-	return "", false
+	return "", nil, false
+}
+
+// unquoteKey resolves a quoted key segment: escapes in a "basic" string, the
+// raw text of a 'literal' one.
+func unquoteKey(q string) string {
+	if q[0] == '"' {
+		if u, err := strconv.Unquote(q); err == nil {
+			return u
+		}
+	}
+	return q[1 : len(q)-1]
+}
+
+// isSubtable reports whether the key segs lies below the key parent.
+func isSubtable(segs, parent []string) bool {
+	return len(segs) > len(parent) && slices.Equal(segs[:len(parent)], parent)
 }
 
 // quotedEnd returns the index of the quote that closes the one at s[i], skipping
@@ -168,10 +194,10 @@ func Scan(file, text string) ([]Pin, []Skip) {
 	}
 	for i, line := range strings.Split(text, "\n") {
 		line = strings.TrimSuffix(line, "\r")
-		if key, ok := parseHeader(line); ok {
-			if cur == nil || !strings.HasPrefix(key, cur.key+".") {
+		if key, segs, ok := parseHeader(line); ok {
+			if cur == nil || !isSubtable(segs, cur.segs) {
 				flush()
-				cur = &entry{key: key}
+				cur = &entry{key: key, segs: segs}
 			}
 			continue
 		}
