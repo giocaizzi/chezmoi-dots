@@ -540,10 +540,9 @@ func (s Survey) Tree(ctx context.Context) inventory.Tree {
 		return inventory.Tree{}
 	}
 	if s.Fetch && !s.Offline {
-		env := []string{"GIT_TERMINAL_PROMPT=0"}
-		if !s.userChoseSSH(ctx, wt) {
-			env = append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes") // never ask for a passphrase
-		}
+		probe, cancel := context.WithTimeout(ctx, s.local())
+		env := chez.GitNoPromptEnv(probe, s.Runner, s.Getenv, wt)
+		cancel()
 		_, _, err := s.exec(ctx, s.net(), env, "git", "-C", wt, "fetch", "--quiet")
 		_ = err // a failed fetch only leaves the last fetched refs in use
 	}
@@ -578,16 +577,6 @@ func (s Survey) Tree(ctx context.Context) inventory.Tree {
 		}
 	}
 	return t
-}
-
-// userChoseSSH reports whether the user set their own ssh command for git, in
-// the environment or in the working tree's git config.
-func (s Survey) userChoseSSH(ctx context.Context, wt string) bool {
-	if s.Getenv != nil && (s.Getenv("GIT_SSH_COMMAND") != "" || s.Getenv("GIT_SSH") != "") {
-		return true
-	}
-	out, _, err := s.exec(ctx, s.local(), nil, "git", "-C", wt, "config", "--get", "core.sshCommand")
-	return err == nil && strings.TrimSpace(out) != ""
 }
 
 func countLines(out string) int {

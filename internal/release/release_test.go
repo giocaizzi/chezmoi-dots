@@ -3,6 +3,7 @@ package release
 import (
 	"context"
 	"io"
+	"slices"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -23,22 +24,46 @@ func TestNewestTag(t *testing.T) {
 	}
 }
 
-type recordRunner struct{ got chez.Cmd }
+// recordRunner answers git ls-remote with one tag and git config with config.
+type recordRunner struct {
+	config string // what `git config --get core.sshCommand` prints
+	lsEnv  []string
+}
 
 func (r *recordRunner) Run(_ context.Context, c chez.Cmd) error {
-	r.got = c
+	if slices.Contains(c.Args, "config") {
+		_, err := io.WriteString(c.Stdout, r.config)
+		return err
+	}
+	r.lsEnv = c.Env
 	_, err := io.WriteString(c.Stdout, "a\trefs/tags/v1.2.0\n")
 	return err
 }
 
 func TestLatestGitNeverPrompts(t *testing.T) {
 	t.Parallel()
-	r := &recordRunner{}
-	got, err := Finder{Runner: r}.Latest(t.Context(), pkgreg.Upstream{Kind: "git", Repo: "https://example.com/octocat/hello.git", TagPrefix: "v"})
-	if err != nil || got != "1.2.0" {
-		t.Fatalf("Latest() = %q, %v, want 1.2.0", got, err)
+	tests := []struct {
+		name   string
+		getenv map[string]string
+		config string
+		want   []string
+	}{
+		{"default", nil, "", []string{"GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -o BatchMode=yes"}},
+		{"GIT_SSH_COMMAND set", map[string]string{"GIT_SSH_COMMAND": "ssh -i key"}, "", []string{"GIT_TERMINAL_PROMPT=0"}},
+		{"core.sshCommand set", nil, "ssh -F cfg\n", []string{"GIT_TERMINAL_PROMPT=0"}},
 	}
-	if diff := cmp.Diff([]string{"GIT_TERMINAL_PROMPT=0"}, r.got.Env); diff != "" {
-		t.Errorf("env (-want +got):\n%s", diff)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := &recordRunner{config: tt.config}
+			f := Finder{Runner: r, Getenv: func(k string) string { return tt.getenv[k] }}
+			got, err := f.Latest(t.Context(), pkgreg.Upstream{Kind: "git", Repo: "ssh://git@example.com/octocat/hello.git", TagPrefix: "v"})
+			if err != nil || got != "1.2.0" {
+				t.Fatalf("Latest() = %q, %v, want 1.2.0", got, err)
+			}
+			if diff := cmp.Diff(tt.want, r.lsEnv); diff != "" {
+				t.Errorf("env (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

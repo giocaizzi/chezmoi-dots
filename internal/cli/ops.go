@@ -69,7 +69,7 @@ func (d Deps) lint(ctx context.Context, args []string) error {
 }
 
 func (d Deps) finder() release.Finder {
-	return release.Finder{Runner: d.Runner, HTTP: d.HTTP}
+	return release.Finder{Runner: d.Runner, HTTP: d.HTTP, Getenv: d.Getenv}
 }
 
 func (d Deps) releases(ctx context.Context) (string, []pkgreg.Release, error) {
