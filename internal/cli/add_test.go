@@ -162,6 +162,25 @@ func TestAddDirectory(t *testing.T) {
 			t.Error("a rejected add ran chezmoi add on the directory")
 		}
 	})
+	t.Run("xfail: a symlink to a folder is a file for chezmoi add, not a folder", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: addTarget uses os.Stat, which follows the link, so a symlink to a folder is " +
+			"rejected as a folder; chezmoi add would add it as symlink_<name>. Use os.Lstat")
+		e := newEnv(t)
+		e.isolate(t)
+		e.file(t, e.dest, filepath.Join("real", "a.conf"), "a\n")
+		link := filepath.Join(e.dest, ".linkdir")
+		if err := os.Symlink(filepath.Join(e.dest, "real"), link); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+
+		if _, stderr, err := e.run(t, "", "add", link, "--desc", "Link"); err != nil {
+			t.Fatalf("add of a symlink to a folder = %v\n%s", err, stderr)
+		}
+		if !strings.Contains(e.registryText(t), `source = "symlink_dot_linkdir"`) {
+			t.Errorf("registry:\n%s", e.registryText(t))
+		}
+	})
 }
 
 func TestAddLocal(t *testing.T) {
@@ -322,6 +341,38 @@ func TestAddGitAutoCommit(t *testing.T) {
 		}
 		if got := e.registryText(t); got != before {
 			t.Errorf("registry changed by a failed add:\n%s", got)
+		}
+	})
+}
+
+func TestAddGitAutoPushFailure(t *testing.T) {
+	t.Parallel()
+	t.Run("xfail: a failed autoPush keeps the committed entry", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: chezmoi add commits the file and the entry, then the push fails; track restores " +
+			"edit.toml anyway, so the worktree drops the committed entry (M .chezmoidata/edit.toml). " +
+			"Restore only when chezmoi add did not create the source file")
+		e := newEnv(t)
+		e.isolate(t)
+		e.gitEnv(t)
+		cfg := e.vars["CHEZMOI_CONFIG_FILE"]
+		b, err := os.ReadFile(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// No remote, so chezmoi commits the source file and its entry, then the push fails.
+		if err = os.WriteFile(cfg, append(b, "    autoPush = true\n"...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		target := e.file(t, e.dest, ".pushed", "x\n")
+
+		if _, _, err = e.run(t, "", "add", target, "--desc", "Pushed"); err == nil {
+			t.Fatal("add succeeded although the push failed")
+		}
+		// The commit holds the file and the entry; the restore must not undo the entry.
+		e.wantCommitted(t, "dot_pushed", ".chezmoidata/edit.toml")
+		if !strings.Contains(e.registryText(t), "[edit.pushed]") {
+			t.Errorf("entry removed although chezmoi added and committed the file:\n%s", e.registryText(t))
 		}
 	})
 }
