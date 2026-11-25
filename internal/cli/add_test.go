@@ -132,6 +132,30 @@ func TestAddErrors(t *testing.T) {
 	}
 }
 
+func TestAddDirectory(t *testing.T) {
+	t.Parallel()
+	t.Run("xfail: add <dir> without --local registers a directory as a source entry", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: add accepts a directory, runs a recursive chezmoi add and writes source = \"dot_<dir>\"; " +
+			"a source entry is a file to edit, so add should reject a directory (suggest --local) before chezmoi add")
+		e := newEnv(t)
+		e.isolate(t)
+		e.file(t, e.dest, filepath.Join(".config", "example", "a.conf"), "a\n")
+		dir := filepath.Join(e.dest, ".config", "example")
+
+		_, _, err := e.run(t, "", "add", dir, "--desc", "Example folder")
+		if err == nil {
+			t.Error("add of a directory succeeded")
+		}
+		if strings.Contains(e.registryText(t), `source = "dot_config/example"`) {
+			t.Errorf("registry has a directory source:\n%s", e.registryText(t))
+		}
+		if _, serr := os.Stat(filepath.Join(e.src, "dot_config", "example")); serr == nil {
+			t.Error("a rejected add ran chezmoi add on the directory")
+		}
+	})
+}
+
 func TestAddLocal(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
