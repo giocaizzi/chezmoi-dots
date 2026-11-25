@@ -24,11 +24,8 @@ func (d Deps) add(ctx context.Context, args []string) error {
 	}
 	name, desc := stringValue(set, "name"), stringValue(set, "desc")
 	tmpl, encrypt, local := boolValue(set, "template"), boolValue(set, "encrypt"), boolValue(set, "local")
-	if len(pos) != 1 || (local && (tmpl || encrypt)) {
-		return ErrUsage
-	}
-	if name != "" && !registry.NamePattern.MatchString(name) {
-		return fmt.Errorf("%w: --name must match [A-Za-z0-9_-]+", ErrUsage)
+	if err = checkAddArgs(pos, name, local, tmpl || encrypt); err != nil {
+		return err
 	}
 	abs, err := d.absPath(pos[0], local)
 	if err != nil {
@@ -74,6 +71,17 @@ func (d Deps) add(ctx context.Context, args []string) error {
 	}
 
 	return d.checkRegistry(ctx, cz, src, file, name, value)
+}
+
+// checkAddArgs rejects command lines add cannot act on.
+func checkAddArgs(pos []string, name string, local, wrap bool) error {
+	if len(pos) != 1 || (local && wrap) {
+		return ErrUsage
+	}
+	if name != "" && !registry.NamePattern.MatchString(name) {
+		return fmt.Errorf("%w: --name must match [A-Za-z0-9_-]+", ErrUsage)
+	}
+	return nil
 }
 
 // checkRegistry validates the whole registry after the write, as lint registry does.

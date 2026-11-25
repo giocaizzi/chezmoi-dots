@@ -32,9 +32,8 @@ func statusColumn(b byte) bool {
 }
 
 func parseStatusLine(line string) (StatusEntry, bool) {
-	switch {
-	case len(line) >= 4 && line[2] == ' ' && statusColumn(line[0]) && statusColumn(line[1]) && strings.TrimSpace(line[3:]) != "":
-		return StatusEntry{Last: line[0], Apply: line[1], Path: line[3:]}, true
+	if len(line) < 4 || line[2] != ' ' || !statusColumn(line[0]) || !statusColumn(line[1]) || strings.TrimSpace(line[3:]) == "" {
+		return StatusEntry{}, false
 	}
-	return StatusEntry{}, false
+	return StatusEntry{Last: line[0], Apply: line[1], Path: line[3:]}, true
 }
