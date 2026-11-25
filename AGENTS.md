@@ -11,9 +11,9 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `internal/matrix/` — 9-matrix OS (Darwin, Linux, Windows) × Role (Personal, Work, Light) evaluator.
 - `internal/lint/` — Comprehensive template and registry integrity validator.
 - `internal/pkgreg/` — Package and release registry validator and version comparator.
-- `internal/release/` — Remote release fetcher and automated checksum bumper (`dots bump`).
+- `internal/release/` — Remote release fetcher and automated checksum bumper (`dots pkg bump`).
 - `internal/inventory/` — System package and tool inventory scanner across package managers.
-- `internal/audit/` — Live unmanaged shell alias detector (`dots audit aliases`).
+- `internal/audit/` — Live unmanaged shell alias detector (`dots audit`).
 - `internal/aliasreg/` — Cross-shell alias registry compiler.
 - `internal/chez/` — Chezmoi client abstraction and execution wrapper.
 - `internal/term/` — Terminal styling, Catppuccin themes, and inventory tables.

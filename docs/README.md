@@ -3,6 +3,7 @@
 Source of truth for decisions, architecture and runbooks of this repo.
 
 - [Command reference](cli.md): arguments, options, defaults, environment and help/error semantics.
+- [Everyday workflow](workflow.md): daily check, editing, upgrades, pin updates, CI usage and migrating from 0.x command names.
 - [Build and install locally](local-build-install.md): checks, build, optional installation, verification and rollback.
 
 ## Apply and publish source edits
