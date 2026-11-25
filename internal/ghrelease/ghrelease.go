@@ -383,14 +383,44 @@ func groupCandidates(assets []Asset, unmapped map[string]bool) map[string][]cand
 	return groups
 }
 
+// templVersion returns name[lo:hi] with version replaced by "{version}" where
+// it is a whole token of name: bounded by the ends of name or a separator.
+func templVersion(name, version string, lo, hi int) string {
+	if version == "" {
+		return name[lo:hi]
+	}
+	var b strings.Builder
+	for i := lo; i < hi; {
+		end := i + len(version)
+		if strings.HasPrefix(name[i:hi], version) &&
+			tokenStart(name, i) &&
+			(end == len(name) || strings.IndexByte(osSeparator, name[end]) >= 0) {
+			b.WriteString("{version}")
+			i = end
+			continue
+		}
+		b.WriteByte(name[i])
+		i++
+	}
+	return b.String()
+}
+
+// tokenStart reports whether a token of name may start at i: at the start of
+// name, after a separator, or after a lone "v" that does (a "v1.2.3" tag form).
+func tokenStart(name string, i int) bool {
+	if i > 0 && name[i-1] == 'v' {
+		i--
+	}
+	return i == 0 || strings.IndexByte(osSeparator, name[i-1]) >= 0
+}
+
 // fillTemplate sets URL and Targets from the chosen assets and checks that
 // the template expands back to every chosen URL.
 func (p *Proposal) fillTemplate(tag string, chosen map[string]cand) error {
-	templ := func(s string) string {
-		if p.Version == "" {
-			return s
-		}
-		return strings.ReplaceAll(s, p.Version, "{version}")
+	templ := func(s string) string { return templVersion(s, p.Version, 0, len(s)) }
+	tagTempl := tag
+	if p.Version != "" {
+		tagTempl = strings.ReplaceAll(tag, p.Version, "{version}")
 	}
 	uniq := map[string]cand{}
 	for _, c := range chosen {
@@ -400,7 +430,7 @@ func (p *Proposal) fillTemplate(tag string, chosen map[string]cand) error {
 	values := map[string]string{} // asset name -> {target} value
 	if len(uniq) == 1 {
 		for _, c := range uniq {
-			prefix, suffix = templ(c.name[:c.start]), templ(c.name[c.end:])
+			prefix, suffix = templVersion(c.name, p.Version, 0, c.start), templVersion(c.name, p.Version, c.end, len(c.name))
 			values[templ(c.name)] = c.name[c.start:c.end]
 		}
 	} else {
@@ -422,7 +452,7 @@ func (p *Proposal) fillTemplate(tag string, chosen map[string]cand) error {
 			bad[c.name] = true
 			continue
 		}
-		p.URL = strings.TrimSuffix(dir, tag+"/") + templ(tag) + "/" + prefix + "{target}" + suffix
+		p.URL = strings.TrimSuffix(dir, tag+"/") + tagTempl + "/" + prefix + "{target}" + suffix
 		p.Targets[k] = values[templ(c.name)]
 	}
 	for k, c := range chosen {

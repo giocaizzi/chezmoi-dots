@@ -296,7 +296,6 @@ func TestMap(t *testing.T) {
 // still gives a URL that holds for the next version.
 func TestMapVersionOnlyInWholeTokens(t *testing.T) {
 	t.Parallel()
-	t.Skip("xfail: Map replaces every occurrence of the version, so tool2 becomes tool{version} and pkg bump to v3 downloads tool3-...")
 	p, err := Map("octocat/tool2", release("v2", "tool2-linux-amd64.tar.gz", "tool2-darwin-arm64.tar.gz"))
 	if err != nil {
 		return // refusing the release is safe
@@ -304,5 +303,23 @@ func TestMapVersionOnlyInWholeTokens(t *testing.T) {
 	got := strings.NewReplacer("{version}", "3", "{target}", p.Targets["linux/amd64"]).Replace(p.URL)
 	if want := dl + "v3/tool2-linux-amd64.tar.gz"; got != want {
 		t.Errorf("URL %q at version 3 = %q, want %q", p.URL, got, want)
+	}
+}
+
+func TestTemplVersion(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, asset, version, want string }{
+		{"inside a name", "tool2-linux-amd64.tar.gz", "2", "tool2-linux-amd64.tar.gz"},
+		{"underscore token", "tool_2_linux_amd64.tar.gz", "2", "tool_{version}_linux_amd64.tar.gz"},
+		{"dotted version", "tool_1.2.3_linux.tar.gz", "1.2.3", "tool_{version}_linux.tar.gz"},
+		{"v prefix", "tool-v1.2.3.tar.gz", "1.2.3", "tool-v{version}.tar.gz"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := templVersion(tt.asset, tt.version, 0, len(tt.asset)); got != tt.want {
+				t.Errorf("templVersion(%q, %q) = %q, want %q", tt.asset, tt.version, got, tt.want)
+			}
+		})
 	}
 }
