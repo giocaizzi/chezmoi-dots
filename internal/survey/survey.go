@@ -27,8 +27,10 @@ const (
 	releaseLookups  = 6       // concurrent upstream lookups
 	defaultTimeout  = 10 * time.Second
 	defaultNetwork  = 15 * time.Second
+	wingetTimeout   = 60 * time.Second // winget export is slow
 	offlineNote     = "offline: latest versions not looked up"
 	unknownLatestFn = "latest unknown for %d (no network or lookup failed)"
+	homeUnknownNote = "home directory unknown: installed versions not read"
 )
 
 // Survey gathers the overview of this machine.
@@ -37,6 +39,7 @@ type Survey struct {
 	Latest      func(context.Context, pkgreg.Upstream) (string, error) // release.Finder.Latest
 	Stat        func(string) (fs.FileInfo, error)                      // os.Stat
 	LookPath    func(string) (string, error)
+	Getenv      func(string) string // nil reads nothing
 	Home        string
 	GOOS        string
 	WorkingTree string        // the dotfiles git checkout; "" when unknown
@@ -162,6 +165,8 @@ func (s Survey) releases(ctx context.Context, rels []inventory.ReleaseSel) inven
 	switch n := countTrue(failed); {
 	case s.Offline:
 		g.Note = offlineNote
+	case s.Home == "":
+		g.Note = homeUnknownNote
 	case n > 0:
 		g.Note = fmt.Sprintf(unknownLatestFn, n)
 	}
@@ -182,7 +187,10 @@ func countTrue(b []bool) int {
 func (s Survey) release(ctx context.Context, r inventory.ReleaseSel) (t inventory.Tool, failed bool) {
 	t = inventory.Tool{Name: r.Release.Name, Pinned: r.Release.Version}
 	dest := filepath.Join(s.Home, filepath.FromSlash(r.Dest))
-	if _, err := s.Stat(dest); errors.Is(err, fs.ErrNotExist) {
+	// With no home, dest would be relative to the working directory: read nothing.
+	if s.Home == "" {
+		// installed stays unknown
+	} else if _, err := s.Stat(dest); errors.Is(err, fs.ErrNotExist) {
 		t.Missing = true
 		return t, false
 	} else if err == nil {
@@ -254,7 +262,7 @@ func (s Survey) brew(ctx context.Context, pkgs []inventory.PackageSel) inventory
 			t.Latest = t.Installed
 			// brew outdated names formulae by full name, casks by token.
 			v, ok := outdated[p.ID]
-			if !ok {
+			if !ok && p.Cask {
 				v, ok = outdated[brewName(p.ID)]
 			}
 			if ok {
@@ -309,6 +317,9 @@ func (s Survey) apt(ctx context.Context, pkgs []inventory.PackageSel) inventory.
 }
 
 func (s Survey) winget(ctx context.Context, pkgs []inventory.PackageSel) inventory.Group {
+	if _, err := s.LookPath("winget"); err != nil {
+		return unknown(pkgs, "winget is not installed")
+	}
 	dir, err := os.MkdirTemp("", "dots-winget-")
 	if err != nil {
 		return unknown(pkgs, "installed versions unknown: winget export failed")
@@ -317,7 +328,7 @@ func (s Survey) winget(ctx context.Context, pkgs []inventory.PackageSel) invento
 	file := filepath.Join(dir, "winget.json")
 	// winget exits non-zero when some sources are unreachable yet still writes the
 	// export, so a readable export wins over the exit status.
-	_, _, err = s.exec(ctx, s.local(), nil, "winget", "export", "--output", file,
+	_, _, err = s.exec(ctx, wingetTimeout, nil, "winget", "export", "--output", file,
 		"--include-versions", "--accept-source-agreements", "--disable-interactivity")
 	_ = err
 	var installed map[string]string
@@ -359,6 +370,9 @@ func (s Survey) latestNote(g inventory.Group, outdatedFailed bool) string {
 }
 
 func (s Survey) uv(ctx context.Context, pkgs []inventory.PackageSel) inventory.Group {
+	if _, err := s.LookPath("uv"); err != nil {
+		return unknown(pkgs, "uv is not installed")
+	}
 	out, _, err := s.exec(ctx, s.local(), nil, "uv", "tool", "list")
 	if err != nil {
 		return unknown(pkgs, "installed versions unknown: uv tool list failed")
@@ -434,7 +448,7 @@ func (s Survey) npm(ctx context.Context, pkgs []inventory.PackageSel) inventory.
 		t.Pinned = pin
 		v, ok := installed[name]
 		t.Installed, t.Missing = v, !ok
-		if ok && !s.Offline && !outdatedFailed {
+		if ok && !s.Offline && !outdatedFailed && pin == "" {
 			t.Latest = v
 			if l, ok := latest[name]; ok {
 				t.Latest = l
@@ -442,9 +456,60 @@ func (s Survey) npm(ctx context.Context, pkgs []inventory.PackageSel) inventory.
 		}
 		g.Tools = append(g.Tools, t)
 	}
+	if !s.Offline {
+		s.npmPinned(ctx, g.Tools)
+	}
 	g.Tools = sorted(g.Tools)
-	g.Note = s.latestNote(g, outdatedFailed)
+	g.Note = s.npmNote(g)
 	return g
+}
+
+// npmPinned sets Latest of every installed pinned tool to the highest version
+// within its pin, which npm outdated does not report. A failed lookup leaves it "".
+func (s Survey) npmPinned(ctx context.Context, tools []inventory.Tool) {
+	sem := make(chan struct{}, releaseLookups)
+	var wg sync.WaitGroup
+	for i := range tools {
+		t := &tools[i]
+		if t.Pinned == "" || t.Missing || t.Installed == "" {
+			continue
+		}
+		wg.Go(func() {
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			spec := t.ID
+			if spec == "" {
+				spec = t.Name
+			}
+			out, _, err := s.exec(ctx, s.net(), nil, "npm", "view", spec+"@"+t.Pinned, "version", "--json")
+			if err != nil {
+				return
+			}
+			versions, err := inventory.NpmView([]byte(out))
+			if err != nil {
+				return
+			}
+			t.Latest = slices.MaxFunc(versions, pkgreg.Compare)
+		})
+	}
+	wg.Wait()
+}
+
+// npmNote is the group note: offline, or how many installed tools have no latest.
+func (s Survey) npmNote(g inventory.Group) string {
+	if s.Offline {
+		return offlineNote
+	}
+	n := 0
+	for _, t := range g.Tools {
+		if !t.Missing && t.Installed != "" && t.Latest == "" {
+			n++
+		}
+	}
+	if n > 0 {
+		return fmt.Sprintf(unknownLatestFn, n)
+	}
+	return ""
 }
 
 func (s Survey) scripts(ctx context.Context, pkgs []inventory.PackageSel) inventory.Group {
@@ -475,7 +540,11 @@ func (s Survey) Tree(ctx context.Context) inventory.Tree {
 		return inventory.Tree{}
 	}
 	if s.Fetch && !s.Offline {
-		_, _, err := s.exec(ctx, s.net(), []string{"GIT_TERMINAL_PROMPT=0"}, "git", "-C", wt, "fetch", "--quiet")
+		env := []string{"GIT_TERMINAL_PROMPT=0"}
+		if !s.userChoseSSH(ctx, wt) {
+			env = append(env, "GIT_SSH_COMMAND=ssh -o BatchMode=yes") // never ask for a passphrase
+		}
+		_, _, err := s.exec(ctx, s.net(), env, "git", "-C", wt, "fetch", "--quiet")
 		_ = err // a failed fetch only leaves the last fetched refs in use
 	}
 	env := []string{"GIT_OPTIONAL_LOCKS=0"}
@@ -509,6 +578,16 @@ func (s Survey) Tree(ctx context.Context) inventory.Tree {
 		}
 	}
 	return t
+}
+
+// userChoseSSH reports whether the user set their own ssh command for git, in
+// the environment or in the working tree's git config.
+func (s Survey) userChoseSSH(ctx context.Context, wt string) bool {
+	if s.Getenv != nil && (s.Getenv("GIT_SSH_COMMAND") != "" || s.Getenv("GIT_SSH") != "") {
+		return true
+	}
+	out, _, err := s.exec(ctx, s.local(), nil, "git", "-C", wt, "config", "--get", "core.sshCommand")
+	return err == nil && strings.TrimSpace(out) != ""
 }
 
 func countLines(out string) int {

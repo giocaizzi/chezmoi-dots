@@ -124,6 +124,34 @@ func TestNpm(t *testing.T) {
 	}
 }
 
+func TestNpmView(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, in string
+		want     []string
+		wantErr  bool
+	}{
+		{"one", `"5.9.2"`, []string{"5.9.2"}, false},
+		{"many", `["5.0.0","5.9.2"]`, []string{"5.0.0", "5.9.2"}, false},
+		{"empty array", `[]`, nil, true},
+		{"empty string", `""`, nil, true},
+		{"invalid", `{`, nil, true},
+		{"object", `{"error":{}}`, nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := NpmView([]byte(tt.in))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("NpmView() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("NpmView() (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestNpmSpec(t *testing.T) {
 	t.Parallel()
 	tests := []struct{ id, name, pin string }{
