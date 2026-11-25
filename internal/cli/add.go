@@ -40,7 +40,7 @@ func (d Deps) add(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	where, value, existing, err := d.addTarget(ctx, cz, reg, src, abs, local, tmpl || encrypt, flagsFor(tmpl, encrypt))
+	where, value, existing, err := d.addTarget(ctx, cz, reg, src, abs, local, tmpl || encrypt)
 	if err != nil {
 		return err
 	}
@@ -58,6 +58,11 @@ func (d Deps) add(ctx context.Context, args []string) error {
 		}
 	}
 
+	if where == "" { // unmanaged: name and description are settled, so chezmoi add now
+		if where, value, err = d.track(ctx, cz, src, abs, flagsFor(tmpl, encrypt)); err != nil {
+			return err
+		}
+	}
 	probe := map[string]any{"edit": map[string]any{name: map[string]any{"desc": desc, where: value}}}
 	if _, bad := registry.Parse(probe); len(bad) > 0 {
 		return fmt.Errorf("invalid registry entry:\n%s", finding.Lines(bad))
@@ -153,9 +158,10 @@ func (d Deps) absPath(p string, local bool) (string, error) {
 	return p, nil
 }
 
-// addTarget settles where the entry points. It adds an unmanaged file to chezmoi
-// unless local. A non-empty existing is the name of the entry that already covers the path.
-func (d Deps) addTarget(ctx context.Context, cz *chez.Client, reg registry.Registry, src, abs string, local, wrap bool, flags []string) (where, value, existing string, err error) {
+// addTarget settles where the entry points without changing anything. A non-empty
+// existing is the name of the entry that already covers the path; an empty where
+// means the file is not managed yet and track must add it.
+func (d Deps) addTarget(ctx context.Context, cz *chez.Client, reg registry.Registry, src, abs string, local, wrap bool) (where, value, existing string, err error) {
 	if local {
 		rel, rerr := filepath.Rel(d.Home, abs)
 		if rerr != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -175,24 +181,41 @@ func (d Deps) addTarget(ctx context.Context, cz *chez.Client, reg registry.Regis
 		if _, err = os.Stat(abs); err != nil {
 			return "", "", "", fmt.Errorf("add %s: %w", abs, err)
 		}
-		if err = cz.Add(ctx, d.Stderr, d.Stderr, abs, flags...); err != nil {
-			return "", "", "", err
-		}
-		if sp, err = cz.SourcePath(ctx, abs, nil); err != nil {
-			return "", "", "", err
-		}
-	} else if wrap {
+		return "", "", "", nil
+	}
+	if wrap {
 		return "", "", "", fmt.Errorf("%s is already managed; --template and --encrypt only apply to new files", abs)
 	}
-	rel, rerr := filepath.Rel(src, sp)
-	if rerr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", "", "", fmt.Errorf("source path %s is outside the source dir %s", sp, src)
+	rel, err := sourceRel(src, sp)
+	if err != nil {
+		return "", "", "", err
 	}
-	rel = filepath.ToSlash(rel)
 	if e, ok := reg.BySource(rel); ok {
 		return "", "", e.Name, nil
 	}
 	return "source", rel, "", nil
+}
+
+// track runs chezmoi add for an unmanaged file and returns its source entry.
+func (d Deps) track(ctx context.Context, cz *chez.Client, src, abs string, flags []string) (where, value string, err error) {
+	if err = cz.Add(ctx, d.Stderr, d.Stderr, abs, flags...); err != nil {
+		return "", "", err
+	}
+	sp, err := cz.SourcePath(ctx, abs, nil)
+	if err != nil {
+		return "", "", err
+	}
+	rel, err := sourceRel(src, sp)
+	return "source", rel, err
+}
+
+// sourceRel is sp relative to the source dir, with forward slashes.
+func sourceRel(src, sp string) (string, error) {
+	rel, err := filepath.Rel(src, sp)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("source path %s is outside the source dir %s", sp, src)
+	}
+	return filepath.ToSlash(rel), nil
 }
 
 // localFolder is path itself for a folder, else the folder that holds the file.

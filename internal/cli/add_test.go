@@ -124,6 +124,10 @@ func TestAddErrors(t *testing.T) {
 			if got := errors.Is(err, cli.ErrUsage); got != tt.usage {
 				t.Errorf("usage error = %v, want %v (%v)", got, tt.usage, err)
 			}
+			// A rejected add leaves the source untouched: chezmoi add runs last.
+			if m, _ := filepath.Glob(filepath.Join(e.src, "dot_"+strings.ReplaceAll(tt.name, " ", "-")+"*")); len(m) > 0 {
+				t.Errorf("source changed by a rejected add: %v", m)
+			}
 		})
 	}
 }
