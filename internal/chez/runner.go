@@ -11,7 +11,12 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// waitDelay bounds how long Run waits for output pipes after the child exits or is
+// killed, so a grandchild holding a pipe cannot outlast either.
+const waitDelay = 2 * time.Second
 
 // Cmd is one process to run.
 type Cmd struct {
@@ -44,7 +49,10 @@ func (ExecRunner) Run(ctx context.Context, c Cmd) error {
 	if len(c.Env) > 0 {
 		cmd.Env = append(cmd.Environ(), c.Env...)
 	}
-	if err := cmd.Run(); err != nil {
+	cmd.WaitDelay = waitDelay
+	// ErrWaitDelay with a live context means the child exited 0 and only a
+	// grandchild kept the output pipe open.
+	if err := cmd.Run(); err != nil && (!errors.Is(err, exec.ErrWaitDelay) || ctx.Err() != nil) {
 		return fmt.Errorf("%s: %w", c.Args[0], err)
 	}
 	return nil
