@@ -30,7 +30,7 @@ func writeFixtures(t *testing.T, names ...string) (files []string, texts map[str
 
 func readAll(t *testing.T, files []string) []string {
 	t.Helper()
-	var got []string
+	got := make([]string, 0, len(files))
 	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {

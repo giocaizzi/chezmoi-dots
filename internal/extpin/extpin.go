@@ -101,22 +101,12 @@ func parseHeader(line string) (string, bool) {
 	for i := 1; i < len(s); i++ {
 		switch c := s[i]; {
 		case c == '"' || c == '\'':
-			key.WriteByte(c)
-			for i++; ; i++ {
-				if i >= len(s) {
-					return "", false // unterminated quote
-				}
-				if c == '"' && s[i] == '\\' && i+1 < len(s) {
-					key.WriteByte(s[i])
-					key.WriteByte(s[i+1])
-					i++
-					continue
-				}
-				key.WriteByte(s[i])
-				if s[i] == c {
-					break
-				}
+			end := quotedEnd(s, i)
+			if end < 0 {
+				return "", false
 			}
+			key.WriteString(s[i : end+1])
+			i = end
 		case c == ' ' || c == '\t':
 		case c == ']':
 			rest := strings.TrimSpace(s[i+1:])
@@ -128,6 +118,37 @@ func parseHeader(line string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// quotedEnd returns the index of the quote that closes the one at s[i], skipping
+// backslash escapes in a basic ("...") string; -1 when it is not closed.
+func quotedEnd(s string, i int) int {
+	q := s[i]
+	for j := i + 1; j < len(s); j++ {
+		switch {
+		case q == '"' && s[j] == '\\':
+			j++
+		case s[j] == q:
+			return j
+		}
+	}
+	return -1
+}
+
+// add records what line i of file says about the entry.
+func (e *entry) add(file string, i int, line string) {
+	if m := githubRe.FindStringSubmatch(line); m != nil {
+		e.urls = append(e.urls, Pin{File: file, Host: "github.com", Repo: m[1], URL: m[0], SHA: m[2], line: i})
+	} else if m := gitlabRe.FindStringSubmatch(line); m != nil {
+		e.urls = append(e.urls, Pin{File: file, Host: m[1], Repo: m[2], URL: m[0], SHA: m[3], line: i})
+	}
+	if m := sumRe.FindStringSubmatch(line); m != nil {
+		e.sums = append(e.sums, m[1])
+		e.lines = append(e.lines, i)
+	}
+	if m := otherRe.FindStringSubmatch(line); m != nil && !slices.Contains(e.others, m[1]) {
+		e.others = append(e.others, m[1])
+	}
 }
 
 // Scan finds the pins in the text of one externals file; file is recorded in each.
@@ -154,20 +175,8 @@ func Scan(file, text string) ([]Pin, []Skip) {
 			}
 			continue
 		}
-		if cur == nil {
-			continue
-		}
-		if m := githubRe.FindStringSubmatch(line); m != nil {
-			cur.urls = append(cur.urls, Pin{File: file, Host: "github.com", Repo: m[1], URL: m[0], SHA: m[2], line: i})
-		} else if m := gitlabRe.FindStringSubmatch(line); m != nil {
-			cur.urls = append(cur.urls, Pin{File: file, Host: m[1], Repo: m[2], URL: m[0], SHA: m[3], line: i})
-		}
-		if m := sumRe.FindStringSubmatch(line); m != nil {
-			cur.sums = append(cur.sums, m[1])
-			cur.lines = append(cur.lines, i)
-		}
-		if m := otherRe.FindStringSubmatch(line); m != nil && !slices.Contains(cur.others, m[1]) {
-			cur.others = append(cur.others, m[1])
+		if cur != nil {
+			cur.add(file, i, line)
 		}
 	}
 	flush()
@@ -200,7 +209,7 @@ func Find(src string) ([]Pin, []Skip) {
 		b, err := os.ReadFile(path) //nolint:gosec // path comes from walking the caller's source dir
 		if err != nil {
 			skips = append(skips, Skip{File: path, Reason: "cannot read: " + err.Error()})
-			return nil
+			return nil //nolint:nilerr // the unreadable file is reported as a skip and the walk goes on
 		}
 		ps, ss := Scan(path, string(b))
 		pins, skips = append(pins, ps...), append(skips, ss...)

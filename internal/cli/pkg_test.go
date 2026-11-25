@@ -410,7 +410,7 @@ func TestPkgStatusReportsSkips(t *testing.T) {
 	if err := cli.Run(t.Context(), d, []string{"pkg", "status", "--offline"}); err != nil {
 		t.Fatalf("Run(pkg status): %v", err)
 	}
-	if want := "skipped 1: \".vim/pack/other\": checksum sha512";!strings.Contains(out.String(), want) {
+	if want := "skipped 1: \".vim/pack/other\": checksum sha512"; !strings.Contains(out.String(), want) {
 		t.Errorf("report lacks %q:\n%s", want, out.String())
 	}
 }

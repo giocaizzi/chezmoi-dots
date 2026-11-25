@@ -759,11 +759,15 @@ func TestArchiveSkips(t *testing.T) {
 	}{
 		{"skips alone make the group", nil, one, true, offlineNote + "; skipped 1: a: more than one sha256", 0},
 		{
-			"entry or file, at most three", []extpin.Pin{pin}, many, true,
+			"entry or file, at most three",
+			[]extpin.Pin{pin},
+			many, true,
 			offlineNote + "; skipped 4: a: r1; dir: cannot read; c: r3; ...", 1,
 		},
 		{
-			"joined with the lookup note", []extpin.Pin{pin}, one, false,
+			"joined with the lookup note",
+			[]extpin.Pin{pin},
+			one, false,
 			"latest unknown for 1 (no network or lookup failed); skipped 1: a: more than one sha256", 1,
 		},
 	}

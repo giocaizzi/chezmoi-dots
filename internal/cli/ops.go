@@ -235,11 +235,11 @@ func writeAll(files []string, texts map[string]string, rename func(oldpath, newp
 func writeTemp(file, text string) (name string, err error) {
 	info, err := os.Stat(file)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("prepare: %w", err)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(file), "."+filepath.Base(file)+".dots-*")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("prepare: %w", err)
 	}
 	defer func() {
 		if err != nil {
@@ -248,17 +248,17 @@ func writeTemp(file, text string) (name string, err error) {
 	}()
 	if _, err = tmp.WriteString(text); err != nil {
 		_ = tmp.Close()
-		return "", err
+		return "", fmt.Errorf("prepare: %w", err)
 	}
 	if err = tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return "", err
+		return "", fmt.Errorf("prepare: %w", err)
 	}
 	if err = tmp.Close(); err != nil {
-		return "", err
+		return "", fmt.Errorf("prepare: %w", err)
 	}
 	if err = os.Chmod(tmp.Name(), info.Mode().Perm()); err != nil {
-		return "", err
+		return "", fmt.Errorf("prepare: %w", err)
 	}
 	return tmp.Name(), nil
 }

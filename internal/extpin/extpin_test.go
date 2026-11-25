@@ -318,7 +318,7 @@ func TestFindUnreadable(t *testing.T) {
 	if len(pins) != 1 || pins[0].File != filepath.Join(src, "ok", ".chezmoiexternal.toml") {
 		t.Errorf("Find() pins = %+v, want only the readable one", pins)
 	}
-	var files []string
+	files := make([]string, 0, len(skips))
 	for _, s := range skips {
 		if s.Entry != "" || s.Reason == "" {
 			t.Errorf("skip %+v: want a path skip with a reason", s)
