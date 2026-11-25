@@ -215,7 +215,8 @@ func (c *Client) WorkingTree(ctx context.Context) (string, error) {
 // Status returns chezmoi status for targets (empty when they are up to date).
 func (c *Client) Status(ctx context.Context, targets ...string) (string, error) {
 	out, err := c.output(ctx, nil, nil, append([]string{"status"}, targets...)...)
-	return strings.TrimSpace(string(out)), err
+	// Trim only the end: a line's first column may be a space.
+	return strings.TrimRight(string(out), "\r\n"), err
 }
 
 // Diff writes chezmoi diff for targets to w.
@@ -226,6 +227,50 @@ func (c *Client) Diff(ctx context.Context, w, errw io.Writer, targets ...string)
 // Apply applies targets.
 func (c *Client) Apply(ctx context.Context, stdout, stderr io.Writer, targets ...string) error {
 	return c.stream(ctx, stdout, stderr, nil, append([]string{"apply"}, targets...)...)
+}
+
+// Add adds target to the source state; flags (--template, --encrypt) go before it.
+func (c *Client) Add(ctx context.Context, stdout, stderr io.Writer, target string, flags ...string) error {
+	sub := append(append([]string{"add"}, flags...), target)
+	return c.stream(ctx, stdout, stderr, nil, sub...)
+}
+
+// AddPlan returns the source path, relative to the source dir, that chezmoi add
+// would create for target, without writing or committing anything.
+func (c *Client) AddPlan(ctx context.Context, target string, flags ...string) (string, error) {
+	sub := append(append([]string{"--dry-run", "--verbose", "add"}, flags...), target)
+	out, err := c.output(ctx, nil, nil, sub...)
+	if err != nil {
+		return "", err
+	}
+	return parseAddPlan(string(out), target)
+}
+
+// parseAddPlan reads the git-style diff of chezmoi --dry-run --verbose add: each
+// "diff --git a/<p> b/<p>" header is followed by "new file mode <mode>", where a
+// directory has mode 40755 and a file 100xxx. The one file is the source path.
+func parseAddPlan(out, target string) (string, error) {
+	const sep = " b/"
+	var files []string
+	var path string
+	for line := range strings.Lines(out) {
+		line = strings.TrimRight(line, "\r\n")
+		if rest, ok := strings.CutPrefix(line, "diff --git a/"); ok {
+			path = ""
+			if n := (len(rest) - len(sep)) / 2; n > 0 && len(rest) == 2*n+len(sep) && rest[:n] == rest[n+len(sep):] {
+				path = rest[:n]
+			}
+			continue
+		}
+		if mode, ok := strings.CutPrefix(line, "new file mode "); ok && path != "" && strings.HasPrefix(mode, "100") {
+			files = append(files, path)
+			path = ""
+		}
+	}
+	if len(files) != 1 {
+		return "", fmt.Errorf("cannot tell the source path chezmoi add would create for %s", target)
+	}
+	return files[0], nil
 }
 
 // Encrypt encrypts plain with the configured encryption, armored as chezmoi writes it.

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -68,7 +69,7 @@ func (d Deps) lint(ctx context.Context, args []string) error {
 }
 
 func (d Deps) finder() release.Finder {
-	return release.Finder{Runner: d.Runner, HTTP: d.HTTP}
+	return release.Finder{Runner: d.Runner, HTTP: d.HTTP, Getenv: d.Getenv}
 }
 
 func (d Deps) releases(ctx context.Context) (string, []pkgreg.Release, error) {
@@ -84,15 +85,32 @@ func (d Deps) releases(ctx context.Context) (string, []pkgreg.Release, error) {
 	return filepath.Join(src, ".chezmoidata", "packages.toml"), pkgreg.Releases(data), nil
 }
 
-// outdated prints the overview of every tool on this machine.
-func (d Deps) outdated(ctx context.Context, args []string) error {
-	fs := newFlags("outdated")
+// pkg dispatches the package lifecycle subcommands; the subcommand is the first token.
+func (d Deps) pkg(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return &commandError{command: cmdPkg, err: fmt.Errorf("%w: pkg needs a command (status, bump)", ErrUsage)}
+	}
+	switch args[0] {
+	case "status":
+		return d.pkgStatus(ctx, args[1:])
+	case "bump":
+		return d.bump(ctx, args[1:])
+	case "-h", "--help":
+		return &commandError{command: cmdPkg, err: flag.ErrHelp}
+	default:
+		return &commandError{command: cmdPkg, err: fmt.Errorf("%w: unknown pkg command %q (commands: status, bump)", ErrUsage, args[0])}
+	}
+}
+
+// pkgStatus prints the overview of every tool on this machine.
+func (d Deps) pkgStatus(ctx context.Context, args []string) error {
+	fs := newFlags(cmdPkgState)
 	pos, err := parse(fs, args)
 	if err != nil {
 		return err
 	}
 	if len(pos) > 0 {
-		return ErrUsage
+		return &commandError{command: cmdPkgState, err: ErrUsage}
 	}
 	cz, _ := d.chezmoi()
 	out, err := cz.Execute(ctx, nil, []byte(inventory.SelectionTemplate), false)
@@ -110,7 +128,11 @@ func (d Deps) outdated(ctx context.Context, args []string) error {
 	rep := survey.Survey{
 		Runner: d.Runner, Latest: d.finder().Latest, Stat: os.Stat, LookPath: d.LookPath,
 		Home: d.Home, GOOS: d.GOOS, WorkingTree: wt, Offline: boolValue(fs, "offline"), Fetch: boolValue(fs, "fetch"),
+		Getenv: d.Getenv,
 	}.Run(ctx, sel)
+	if ctx.Err() != nil {
+		return fmt.Errorf("pkg status: %w", ctx.Err())
+	}
 	term.NewStyle(d.Stdout, d.Getenv).Inventory(d.Stdout, rep, time.Now())
 	if boolValue(fs, "check") && rep.Failing() {
 		return ErrReported
@@ -118,33 +140,8 @@ func (d Deps) outdated(ctx context.Context, args []string) error {
 	return nil
 }
 
-// releaseCheck prints whether each pinned release has a newer upstream version.
-func (d Deps) releaseCheck(ctx context.Context) error {
-	_, rels, err := d.releases(ctx)
-	if err != nil {
-		return err
-	}
-	st := term.NewStyle(d.Stdout, d.Getenv)
-	n := 0
-	for _, s := range d.finder().Check(ctx, rels) {
-		switch {
-		case s.Err != nil:
-			fmt.Fprintf(d.Stdout, "%s%-16s%s %s✗ %v%s\n", st.M, s.Release.Name, st.O, st.R, s.Err, st.O)
-		case s.Outdated():
-			n++
-			fmt.Fprintf(d.Stdout, "%s%-16s%s %s → %s%s%s\n", st.M, s.Release.Name, st.O, s.Release.Version, st.G, s.Latest, st.O)
-		default:
-			fmt.Fprintf(d.Stdout, "%s%-16s %s up to date%s\n", st.D, s.Release.Name, s.Release.Version, st.O)
-		}
-	}
-	if n > 0 {
-		fmt.Fprintf(d.Stdout, "\n%d outdated: chezmoi dots bump pins the new versions and checksums\n", n)
-	}
-	return nil
-}
-
 func (d Deps) bump(ctx context.Context, args []string) error {
-	fs := newFlags("bump")
+	fs := newFlags(cmdPkgBump)
 	names, err := parse(fs, args)
 	if err != nil {
 		return err
@@ -156,7 +153,7 @@ func (d Deps) bump(ctx context.Context, args []string) error {
 	if len(names) > 0 {
 		rels = slices.DeleteFunc(rels, func(r pkgreg.Release) bool { return !slices.Contains(names, r.Name) })
 		if len(rels) != len(names) {
-			return fmt.Errorf("%w: unknown release in %v", ErrUsage, names)
+			return &commandError{command: cmdPkgBump, err: fmt.Errorf("%w: unknown pin in %v", ErrUsage, names)}
 		}
 	}
 	text, err := os.ReadFile(file) //nolint:gosec // file is the package registry in the user's own dotfiles source
@@ -210,14 +207,7 @@ func (d Deps) upgrade(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUsage, err)
 	}
-	if err := upgrade.Run(ctx, d.Runner, steps, boolValue(fs, "dry-run"), d.Stdout, d.Stderr); err != nil {
-		return err
-	}
-	if len(only) == 0 || slices.Contains(only, "releases") {
-		fmt.Fprintln(d.Stdout, "==> releases: pinned binaries")
-		return d.releaseCheck(ctx)
-	}
-	return nil
+	return upgrade.Run(ctx, d.Runner, steps, boolValue(fs, "dry-run"), d.Stdout, d.Stderr)
 }
 
 func (d Deps) live(ctx context.Context, args []string) error {

@@ -85,7 +85,7 @@ func TestInventoryClean(t *testing.T) {
 		Groups: []inventory.Group{{Source: inventory.Brew, Tools: []inventory.Tool{{Name: "jq", Installed: "1", Latest: "1"}}}},
 		Tree:   inventory.Tree{Branch: "main"},
 	}, now)
-	want := "chezmoi dots outdated — every tool on this machine   linux · light · offline\n\n" +
+	want := "chezmoi dots pkg status — every tool on this machine   linux · light · offline\n\n" +
 		"Homebrew (1)\n" +
 		"  TOOL  INSTALLED  LATEST  STATE\n" +
 		"  jq    1          1       ✓ up to date\n\n" +

@@ -143,11 +143,11 @@ func (d Deps) view(ctx context.Context, args []string) error {
 		return err
 	}
 	as := stringValue(fs, "as")
-	matrixFlag, all := boolValue(fs, "matrix"), boolValue(fs, "all")
-	if as != "" && (matrixFlag || all) {
+	matrixFlag := boolValue(fs, "matrix")
+	if as != "" && matrixFlag {
 		return ErrUsage
 	}
-	if len(pos) > 1 || (len(pos) == 0 && !matrixFlag && !all) {
+	if len(pos) > 1 || (len(pos) == 0 && !matrixFlag) {
 		return ErrUsage
 	}
 	cfg := matrix.Config{}
@@ -165,14 +165,14 @@ func (d Deps) view(ctx context.Context, args []string) error {
 
 	switch len(pos) {
 	case 0:
-		if matrixFlag || all {
+		if matrixFlag {
 			return s.ViewOverview(ctx)
 		}
 		return ErrUsage
 	case 1:
 		mode := edit.ViewHere
 		switch {
-		case matrixFlag || all:
+		case matrixFlag:
 			mode = edit.ViewMatrix
 		case as != "":
 			mode = edit.ViewAs

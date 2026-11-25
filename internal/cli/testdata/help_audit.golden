@@ -1,20 +1,19 @@
 chezmoi dots audit — Audit live shell configuration
 
 USAGE
-  chezmoi dots audit aliases
-
-COMMANDS
-  aliases    Detect unmanaged live shell aliases
+  chezmoi dots audit [<check>...]
 
 ARGUMENTS
-  aliases  Required audit command; there is no default audit.
+  check  aliases: detect unmanaged live shell aliases in the available zsh and bash interactive shells (default: all checks).
+  Checks are arguments, not subcommands.
 
 OPTIONS
   -h, --help  Show this help and exit successfully.
 
 ENVIRONMENT
-  See aliases help for shell configuration locations.
+  XDG_CONFIG_HOME  config directory (default: ~/.config).
+  Reads shell/aliases.sh and shell/omz-aliases.zsh there, and ~/.oh-my-zsh/plugins.
 
 EXAMPLES
+  chezmoi dots audit
   chezmoi dots audit aliases
-  chezmoi dots help audit aliases

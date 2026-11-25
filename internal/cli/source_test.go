@@ -95,15 +95,15 @@ func TestBumpSourceDir(t *testing.T) {
 				},
 				Stdout: &out, Stderr: &bytes.Buffer{}, Runner: fake,
 			}
-			err := cli.Run(t.Context(), d, []string{"bump"})
+			err := cli.Run(t.Context(), d, []string{"pkg", "bump"})
 			if (err != nil) != (tt.wantErr != "") || (err != nil && !strings.Contains(err.Error(), tt.wantErr)) {
-				t.Fatalf("bump error = %v, want %q", err, tt.wantErr)
+				t.Fatalf("pkg bump error = %v, want %q", err, tt.wantErr)
 			}
 			if diff := cmp.Diff(tt.wantSubs, fake.subs); diff != "" {
 				t.Errorf("chezmoi calls (-want +got):\n%s", diff)
 			}
 			if err == nil && !strings.Contains(out.String(), "all releases are up to date\n") {
-				t.Errorf("bump output = %q, want it to read the registry", out.String())
+				t.Errorf("pkg bump output = %q, want it to read the registry", out.String())
 			}
 		})
 	}

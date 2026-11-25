@@ -3,7 +3,7 @@
 # chezmoi-dots
 
 **The Developer Companion Plugin for Chezmoi.**  
-Declarative registry-driven editing, package inventory drift detection, automated release bumping, template dependency graphs, and live preview.
+Declarative registry-driven editing, package survey and drift detection, pin bumping, a dotfiles status check, template dependency graphs, and live preview.
 
 [![Release](https://img.shields.io/github/v/release/giocaizzi/chezmoi-dots?sort=semver)](https://github.com/giocaizzi/chezmoi-dots/releases/latest)
 [![CI](https://github.com/giocaizzi/chezmoi-dots/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/giocaizzi/chezmoi-dots/actions/workflows/ci.yml)
@@ -25,7 +25,9 @@ Declarative registry-driven editing, package inventory drift detection, automate
 
 - **Registry-Driven Editing (`dots <target>`)**: Open dotfiles by logical alias (`dots zsh`, `dots git`, `dots ssh/config`) with pre-save linters, atomic temp files, and post-save formatters.
 - **Zero-Config Fallback**: Works on any `chezmoi managed` repository without configuration—fuzzy pick and edit any managed target directly.
-- **Inventory & Drift Audit (`dots outdated`, `dots bump`)**: Query Homebrew, Apt, winget, uv, npm, and GitHub Releases to detect version drift against your pins. Update pins with comment-preserving text edits.
+- **Add & Register (`dots add`)**: Bring a new file under chezmoi and register it for editing in one step.
+- **Status Snapshot (`dots status`)**: See the dotfiles checkout (branch, ahead/behind, local changes) and what `chezmoi apply` would change, without touching the network.
+- **Package Survey & Pins (`dots pkg status`, `dots pkg bump`)**: Query Homebrew, Apt, winget, uv, npm, and GitHub Releases to detect version drift against your pins. Update pins with comment-preserving text edits.
 - **Live Preview**: Editing can render live updates to a side pane using tmux or Windows Terminal; `live` is the internal pane command.
 - **Template Composition (`dots view`)**: Inspect a target's composition tree and rendered content, including previews across OS/role configurations.
 - **Template Linting (`dots lint`)**: Verify template syntax, detect unrendered delimiters, and validate cross-OS matrix configurations.
@@ -70,19 +72,22 @@ go install github.com/giocaizzi/chezmoi-dots/cmd/chezmoi-dots@latest
 | Command | Arguments | Description |
 |---|---|---|
 | `dots [edit]` | `[<what>]` | Edit a registry entry, source file or managed target; omitting the selector opens a picker |
-| `dots view` | `[<what>]` | Preview rendered content and composition; supports matrix overviews |
+| `dots add` | `<path>` | Manage a file and register it for editing |
+| `dots view` | `[<what>]` | Preview rendered content and composition; `--matrix` shows all configurations |
 | `dots list` | none | List configured editable registry components |
-| `dots lint` | `[<check>...]` | Lint registries, template syntax, and matrix rules |
-| `dots audit` | `aliases` | Audit live shell environment against alias registry |
-| `dots outdated` | none | Survey installed packages against pins and upstream releases |
-| `dots bump` | `[<release>...]` | Fetch latest releases and update pinned versions in registry |
+| `dots status` | none | Show the dotfiles checkout and what `chezmoi apply` would change |
 | `dots upgrade` | `[<step>...]` | Update dotfiles and tools via their native managers |
+| `dots lint` | `[<check>...]` | Lint registries, template syntax, and matrix rules |
+| `dots audit` | `[<check>...]` | Audit live shell aliases against the alias registry |
+| `dots pkg status` | none | Survey installed packages against pins and upstream releases |
+| `dots pkg bump` | `[<pin>...]` | Fetch latest releases and update pinned versions in the registry |
 | `dots version` | none | Print the binary version |
-| `dots help` | `[<command> [<child>]]` | Show root or local help |
+| `dots help` | `[<command> [<subcommand>]]` | Show root or local help |
 
 Use `dots <command> --help` for command-specific options. See the full
 [command reference](docs/cli.md) for defaults, environment, parsing and exit
-semantics, including the internal `live` command. For source builds, see
+semantics, including the internal `live` command. The day-to-day procedures are
+in the [everyday workflow](docs/workflow.md) runbook. For source builds, see
 [Build and install locally](docs/local-build-install.md).
 
 See [Apply and publish source edits](docs/README.md#apply-and-publish-source-edits) for the chezmoi settings that control apply and Git automation.

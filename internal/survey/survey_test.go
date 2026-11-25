@@ -138,7 +138,7 @@ func TestRunGroupsInOrder(t *testing.T) {
 	t.Parallel()
 	r := newRunner(map[string]reply{"uv tool list": {stdout: "b v1.0.0\n"}, "uv tool list --outdated": {}})
 	s := base(r)
-	s.LookPath = lookPath("npm")
+	s.LookPath = lookPath("npm", "uv")
 	sel := inventory.Selection{
 		OS: "plan9", Role: "work",
 		Packages: map[inventory.Source][]inventory.PackageSel{
@@ -203,6 +203,27 @@ func TestReleases(t *testing.T) {
 	})
 }
 
+func TestReleasesWithoutHome(t *testing.T) {
+	t.Parallel()
+	r := newRunner(nil)
+	s := base(r)
+	s.Home = ""
+	s.Stat = func(p string) (fs.FileInfo, error) {
+		t.Errorf("Stat(%q) with no home", p)
+		return nil, fs.ErrNotExist
+	}
+	s.Latest = func(context.Context, pkgreg.Upstream) (string, error) { return "1.3.0", nil }
+	g := s.releases(t.Context(), []inventory.ReleaseSel{relSel("a", "1.2.3")})
+	checkGroup(t, g, homeUnknownNote, []inventory.Tool{{Name: "a", Pinned: "1.2.3", Latest: "1.3.0"}})
+	if len(r.calls) != 0 {
+		t.Errorf("ran %v with no home", r.calls)
+	}
+	s.Offline = true
+	if got := s.releases(t.Context(), []inventory.ReleaseSel{relSel("a", "1.2.3")}).Note; got != offlineNote {
+		t.Errorf("offline Note = %q, want %q", got, offlineNote)
+	}
+}
+
 func TestOfflineRunsNoNetworkCommand(t *testing.T) {
 	t.Parallel()
 	home := filepath.Join(string(filepath.Separator), "home", "u")
@@ -216,7 +237,7 @@ func TestOfflineRunsNoNetworkCommand(t *testing.T) {
 	s := base(r)
 	s.Offline, s.Fetch, s.GOOS = true, true, "linux"
 	s.WorkingTree = "/wt"
-	s.LookPath = lookPath("npm")
+	s.LookPath = lookPath("npm", "uv")
 	s.Stat = statOf(map[string]time.Time{bin: {}})
 	s.Latest = func(context.Context, pkgreg.Upstream) (string, error) {
 		t.Error("Latest called offline")
@@ -272,6 +293,19 @@ func TestBrew(t *testing.T) {
 			t.Errorf("env (-want +got):\n%s", diff)
 		}
 	})
+	t.Run("tap formula is not matched by its short name", func(t *testing.T) {
+		t.Parallel()
+		m := map[string]reply{
+			"brew list --formula --versions": {stdout: "tap 3.0\n"},
+			"brew list --cask --versions":    {},
+			"brew outdated --json=v2":        {stdout: `{"formulae":[{"name":"tap","current_version":"9.9"}],"casks":[]}`},
+		}
+		s := base(newRunner(m))
+		s.LookPath = lookPath("brew")
+		checkGroup(t, s.brew(t.Context(), []inventory.PackageSel{{Name: "tap", ID: "o/t/tap"}}), "", []inventory.Tool{
+			{Name: "tap", ID: "o/t/tap", Installed: "3.0", Latest: "3.0"},
+		})
+	})
 	t.Run("not installed", func(t *testing.T) {
 		t.Parallel()
 		s := base(newRunner(nil))
@@ -314,6 +348,7 @@ func TestWinget(t *testing.T) {
 		r := &wingetRunner{content: content, err: err}
 		s := base(nil)
 		s.Runner = r
+		s.LookPath = lookPath("winget")
 		return s
 	}
 	checkGroup(t, run(`{"Sources":[{"Packages":[{"PackageIdentifier":"git.git","Version":"2.50.0"}]}]}`, nil).winget(t.Context(), pkgs),
@@ -321,6 +356,7 @@ func TestWinget(t *testing.T) {
 			{Name: "git", ID: "Git.Git", Installed: "2.50.0"},
 			{Name: "jq", ID: "JQ.JQ", Missing: true},
 		})
+	checkGroup(t, base(newRunner(nil)).winget(t.Context(), pkgs[:1]), "winget is not installed", []inventory.Tool{{Name: "git", ID: "Git.Git"}})
 	checkGroup(t, run("", errors.New("x")).winget(t.Context(), pkgs[:1]),
 		"installed versions unknown: winget export failed", []inventory.Tool{{Name: "git", ID: "Git.Git"}})
 }
@@ -331,7 +367,10 @@ type wingetRunner struct {
 	err     error
 }
 
-func (w *wingetRunner) Run(_ context.Context, c chez.Cmd) error {
+func (w *wingetRunner) Run(ctx context.Context, c chez.Cmd) error {
+	if d, ok := ctx.Deadline(); !ok || time.Until(d) < 30*time.Second {
+		return errors.New("winget export needs its own long timeout")
+	}
 	i := slices.Index(c.Args, "--output")
 	if c.Args[0] != "winget" || i < 0 || !slices.Contains(c.Args, "--include-versions") || !slices.Contains(c.Args, "--disable-interactivity") {
 		return errors.New("unexpected " + strings.Join(c.Args, " "))
@@ -352,6 +391,7 @@ func TestUV(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		t.Parallel()
 		s := base(newRunner(map[string]reply{"uv tool list": list, "uv tool list --outdated": {stdout: "pyright v1.1.400 [latest: 1.1.405]\n"}}))
+		s.LookPath = lookPath("uv")
 		checkGroup(t, s.uv(t.Context(), pkgs), "", []inventory.Tool{
 			{Name: "gone", Missing: true},
 			{Name: "pyright", Installed: "1.1.400", Latest: "1.1.405"},
@@ -361,6 +401,7 @@ func TestUV(t *testing.T) {
 	t.Run("outdated fails", func(t *testing.T) {
 		t.Parallel()
 		s := base(newRunner(map[string]reply{"uv tool list": list, "uv tool list --outdated": {err: errors.New("x"), stderr: secret}}))
+		s.LookPath = lookPath("uv")
 		checkGroup(t, s.uv(t.Context(), pkgs[:2]), "latest unknown for 2 (no network or lookup failed)", []inventory.Tool{
 			{Name: "pyright", Installed: "1.1.400"},
 			{Name: "ruff", Installed: "0.9.1"},
@@ -368,7 +409,13 @@ func TestUV(t *testing.T) {
 	})
 	t.Run("list fails", func(t *testing.T) {
 		t.Parallel()
-		checkGroup(t, base(newRunner(nil)).uv(t.Context(), pkgs[1:2]), "installed versions unknown: uv tool list failed", []inventory.Tool{{Name: "ruff"}})
+		s := base(newRunner(nil))
+		s.LookPath = lookPath("uv")
+		checkGroup(t, s.uv(t.Context(), pkgs[1:2]), "installed versions unknown: uv tool list failed", []inventory.Tool{{Name: "ruff"}})
+	})
+	t.Run("not installed", func(t *testing.T) {
+		t.Parallel()
+		checkGroup(t, base(newRunner(nil)).uv(t.Context(), pkgs[1:2]), "uv is not installed", []inventory.Tool{{Name: "ruff"}})
 	})
 }
 
@@ -382,14 +429,31 @@ func TestNpm(t *testing.T) {
 		s.GOOS = "linux"
 		pre := " --prefix " + filepath.Join(s.Home, ".local")
 		s.Runner = newRunner(map[string]reply{
-			"npm ls -g --depth=0 --json" + pre: {stdout: ls, err: errors.New("exit 1")},
-			"npm outdated -g --json" + pre:     {stdout: `{"typescript":{"latest":"6.0.0"}}`, err: errors.New("exit 1")},
+			"npm ls -g --depth=0 --json" + pre:     {stdout: ls, err: errors.New("exit 1")},
+			"npm outdated -g --json" + pre:         {stdout: `{"typescript":{"latest":"6.0.0"},"@s/cli":{"latest":"1.1.0"}}`, err: errors.New("exit 1")},
+			"npm view typescript@5 version --json": {stdout: `["5.0.0","5.10.0","5.9.2"]`},
 		})
-		s.LookPath = lookPath("npm")
+		s.LookPath = lookPath("npm", "uv")
 		checkGroup(t, s.npm(t.Context(), pkgs), "", []inventory.Tool{
-			{Name: "cli", ID: "@s/cli", Installed: "1.0.0", Latest: "1.0.0"},
+			{Name: "cli", ID: "@s/cli", Installed: "1.0.0", Latest: "1.1.0"},
 			{Name: "gone", Missing: true},
-			{Name: "ts", ID: "typescript", Installed: "5.9.2", Pinned: "5", Latest: "6.0.0"},
+			{Name: "ts", ID: "typescript", Installed: "5.9.2", Pinned: "5", Latest: "5.10.0"},
+		})
+	})
+	t.Run("pinned view is a single string, failed view leaves latest unknown", func(t *testing.T) {
+		t.Parallel()
+		two := []inventory.PackageSel{pkg("ts", "typescript@5"), pkg("lint", "eslint@9")}
+		lsBoth := `{"dependencies":{"typescript":{"version":"5.9.2"},"eslint":{"version":"9.1.0"}}}`
+		s := base(newRunner(map[string]reply{
+			"npm ls -g --depth=0 --json":           {stdout: lsBoth},
+			"npm outdated -g --json":               {},
+			"npm view typescript@5 version --json": {stdout: `"5.9.3"`},
+			"npm view eslint@9 version --json":     {err: errors.New("E404"), stderr: secret},
+		}))
+		s.LookPath = lookPath("npm", "uv")
+		checkGroup(t, s.npm(t.Context(), two), "latest unknown for 1 (no network or lookup failed)", []inventory.Tool{
+			{Name: "lint", ID: "eslint", Installed: "9.1.0", Pinned: "9"},
+			{Name: "ts", ID: "typescript", Installed: "5.9.2", Pinned: "5", Latest: "5.9.3"},
 		})
 	})
 	t.Run("darwin has no prefix, outdated fails", func(t *testing.T) {
@@ -399,7 +463,7 @@ func TestNpm(t *testing.T) {
 			"npm outdated -g --json":     {err: errors.New("offline"), stderr: secret},
 		}))
 		s.GOOS = "darwin"
-		s.LookPath = lookPath("npm")
+		s.LookPath = lookPath("npm", "uv")
 		checkGroup(t, s.npm(t.Context(), pkgs[:1]), "latest unknown for 1 (no network or lookup failed)", []inventory.Tool{
 			{Name: "ts", ID: "typescript", Installed: "5.9.2", Pinned: "5"},
 		})
@@ -407,7 +471,7 @@ func TestNpm(t *testing.T) {
 	t.Run("nothing outdated", func(t *testing.T) {
 		t.Parallel()
 		s := base(newRunner(map[string]reply{"npm ls -g --depth=0 --json": {stdout: ls}, "npm outdated -g --json": {}}))
-		s.LookPath = lookPath("npm")
+		s.LookPath = lookPath("npm", "uv")
 		checkGroup(t, s.npm(t.Context(), pkgs[1:2]), "", []inventory.Tool{{Name: "cli", ID: "@s/cli", Installed: "1.0.0", Latest: "1.0.0"}})
 	})
 	t.Run("not installed", func(t *testing.T) {
@@ -417,7 +481,7 @@ func TestNpm(t *testing.T) {
 	t.Run("ls fails", func(t *testing.T) {
 		t.Parallel()
 		s := base(newRunner(nil))
-		s.LookPath = lookPath("npm")
+		s.LookPath = lookPath("npm", "uv")
 		checkGroup(t, s.npm(t.Context(), pkgs[:1]), "installed versions unknown: npm ls failed", []inventory.Tool{{Name: "ts", ID: "typescript@5"}})
 	})
 }
@@ -460,7 +524,7 @@ func TestTree(t *testing.T) {
 		s.WorkingTree = "/wt"
 		s.Stat = statOf(map[string]time.Time{fetchHead: fetchedAt})
 		want := inventory.Tree{Known: true, Branch: "main", Upstream: "origin/main", Ahead: 2, Behind: 5, Dirty: 2, Fetched: fetchedAt}
-		if diff := cmp.Diff(want, s.tree(t.Context())); diff != "" {
+		if diff := cmp.Diff(want, s.Tree(t.Context())); diff != "" {
 			t.Errorf("tree (-want +got):\n%s", diff)
 		}
 		if r.called("git -C /wt fetch") {
@@ -478,18 +542,18 @@ func TestTree(t *testing.T) {
 		s := base(newRunner(m))
 		s.WorkingTree = "/wt"
 		want := inventory.Tree{Known: true, Dirty: 2}
-		if diff := cmp.Diff(want, s.tree(t.Context())); diff != "" {
+		if diff := cmp.Diff(want, s.Tree(t.Context())); diff != "" {
 			t.Errorf("tree (-want +got):\n%s", diff)
 		}
 	})
 	t.Run("unknown", func(t *testing.T) {
 		t.Parallel()
-		if got := base(newRunner(nil)).tree(t.Context()); got.Known {
+		if got := base(newRunner(nil)).Tree(t.Context()); got.Known {
 			t.Errorf("no working tree: Known")
 		}
 		s := base(newRunner(nil))
 		s.WorkingTree = "/wt"
-		if got := s.tree(t.Context()); got.Known {
+		if got := s.Tree(t.Context()); got.Known {
 			t.Errorf("git failing: Known")
 		}
 	})
@@ -505,7 +569,7 @@ func TestTreeFetch(t *testing.T) {
 		r := newRunner(m)
 		s := base(r)
 		s.WorkingTree, s.Fetch, s.Offline = "/wt", tt.fetch, tt.offline
-		tree := s.tree(t.Context())
+		tree := s.Tree(t.Context())
 		if got := r.called("git -C /wt fetch"); got != tt.want {
 			t.Errorf("fetch=%v offline=%v: fetched = %v, want %v", tt.fetch, tt.offline, got, tt.want)
 		}
@@ -513,7 +577,8 @@ func TestTreeFetch(t *testing.T) {
 			t.Errorf("a failed fetch must not make the tree unknown")
 		}
 		if tt.want {
-			if diff := cmp.Diff([]string{"GIT_TERMINAL_PROMPT=0"}, r.envs[git("fetch --quiet")]); diff != "" {
+			want := []string{"GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND=ssh -o BatchMode=yes"}
+			if diff := cmp.Diff(want, r.envs[git("fetch --quiet")]); diff != "" {
 				t.Errorf("env (-want +got):\n%s", diff)
 			}
 		}
@@ -531,5 +596,34 @@ func TestCapBuf(t *testing.T) {
 	}
 	if c.b.Len() != outputCap {
 		t.Errorf("kept %d bytes, want %d", c.b.Len(), outputCap)
+	}
+}
+
+func TestTreeFetchKeepsUsersSSH(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		getenv map[string]string
+		config string
+	}{
+		{"GIT_SSH_COMMAND", map[string]string{"GIT_SSH_COMMAND": "ssh -i key"}, ""},
+		{"GIT_SSH", map[string]string{"GIT_SSH": "/bin/myssh"}, ""},
+		{"core.sshCommand", nil, "ssh -F cfg\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := fullTree()
+			m[git("fetch --quiet")] = reply{}
+			m[git("config --get core.sshCommand")] = reply{stdout: tt.config}
+			r := newRunner(m)
+			s := base(r)
+			s.WorkingTree, s.Fetch = "/wt", true
+			s.Getenv = func(k string) string { return tt.getenv[k] }
+			s.Tree(t.Context())
+			if diff := cmp.Diff([]string{"GIT_TERMINAL_PROMPT=0"}, r.envs[git("fetch --quiet")]); diff != "" {
+				t.Errorf("env (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

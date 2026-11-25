@@ -1,5 +1,5 @@
 // Package pkgreg is the package registry (.chezmoidata/packages.toml): validation,
-// the release table, and the text edit `chezmoi dots bump` makes to it.
+// the release table, and the text edit `chezmoi dots pkg bump` makes to it.
 package pkgreg
 
 import (
@@ -117,7 +117,7 @@ func validateRelease(n string, r map[string]any) []finding.Finding {
 			bad("target %s must be <os>/<arch>", t)
 		}
 		if s, _ := sums[t].(string); !sha256.MatchString(s) {
-			bad("target %s has no valid sha256 (chezmoi dots bump)", t)
+			bad("target %s has no valid sha256 (chezmoi dots pkg bump)", t)
 		}
 	}
 	for _, t := range sortedKeys(sums) {

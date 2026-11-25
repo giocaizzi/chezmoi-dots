@@ -39,13 +39,16 @@ var ErrUsage = edit.ErrUsage
 
 const (
 	cmdEdit     = "edit"
+	cmdAdd      = "add"
+	cmdStatus   = "status"
 	cmdView     = "view"
 	cmdList     = "list"
 	cmdLint     = "lint"
 	cmdAudit    = "audit"
 	cmdAliases  = "aliases"
-	cmdOutdated = "outdated"
-	cmdBump     = "bump"
+	cmdPkg      = "pkg"
+	cmdPkgState = "pkg status"
+	cmdPkgBump  = "pkg bump"
 	cmdUpgrade  = "upgrade"
 	cmdLive     = "live"
 	cmdVersion  = "version"
@@ -65,7 +68,7 @@ func Run(ctx context.Context, d Deps, args []string) error {
 	cmd, rest := cmdEdit, args
 	if len(args) > 0 {
 		switch args[0] {
-		case cmdEdit, cmdView, cmdList, cmdLint, cmdAudit, cmdOutdated, cmdBump, cmdUpgrade, cmdLive, cmdVersion, cmdHelp:
+		case cmdEdit, cmdAdd, cmdStatus, cmdView, cmdList, cmdLint, cmdAudit, cmdPkg, cmdUpgrade, cmdLive, cmdVersion, cmdHelp:
 			cmd, rest = args[0], args[1:]
 		case "-h", "--help":
 			cmd, rest = "", args
@@ -94,6 +97,10 @@ func (d Deps) run(ctx context.Context, cmd string, args []string) error {
 	switch cmd {
 	case cmdEdit:
 		return d.edit(ctx, args)
+	case cmdAdd:
+		return d.add(ctx, args)
+	case cmdStatus:
+		return d.status(ctx, args)
 	case cmdView:
 		return d.view(ctx, args)
 	case cmdList:
@@ -102,10 +109,8 @@ func (d Deps) run(ctx context.Context, cmd string, args []string) error {
 		return d.lint(ctx, args)
 	case cmdAudit:
 		return d.audit(ctx, args)
-	case cmdOutdated:
-		return d.outdated(ctx, args)
-	case cmdBump:
-		return d.bump(ctx, args)
+	case cmdPkg:
+		return d.pkg(ctx, args)
 	case cmdUpgrade:
 		return d.upgrade(ctx, args)
 	case cmdLive:
@@ -140,9 +145,6 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 			return pos, nil
 		}
 		pos = append(pos, fs.Arg(0))
-		if fs.Name() == cmdAudit && len(pos) == 1 && pos[0] == cmdAliases {
-			fs.Init("audit aliases", flag.ContinueOnError)
-		}
 		args = fs.Args()[1:]
 	}
 }

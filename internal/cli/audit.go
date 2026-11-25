@@ -11,20 +11,23 @@ import (
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
 )
 
-// audit lists the aliases live in this machine's interactive shells that the registry
-// does not account for.
+// audit runs the live checks; aliases is the only one, so naming it or nothing runs it.
 func (d Deps) audit(ctx context.Context, args []string) error {
-	pos, err := parse(newFlags(cmdAudit), args)
+	checks, err := parse(newFlags(cmdAudit), args)
 	if err != nil {
 		return err
 	}
-	if len(pos) != 1 || pos[0] != cmdAliases {
-		page := cmdAudit
-		if len(pos) > 0 && pos[0] == cmdAliases {
-			page = "audit aliases"
+	for _, c := range checks {
+		if c != cmdAliases {
+			return &commandError{command: cmdAudit, err: fmt.Errorf("%w: unknown audit check %q (checks: %s)", ErrUsage, c, cmdAliases)}
 		}
-		return &commandError{command: page, err: fmt.Errorf("%w: audit takes aliases", ErrUsage)}
 	}
+	return d.auditAliases(ctx)
+}
+
+// auditAliases lists the aliases live in this machine's interactive shells that the
+// registry does not account for.
+func (d Deps) auditAliases(ctx context.Context) error {
 	known, err := d.knownAliases()
 	if err != nil {
 		return err

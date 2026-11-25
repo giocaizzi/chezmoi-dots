@@ -5,13 +5,14 @@ USAGE
 
 COMMANDS
   edit       Edit dotfiles source (default command)
+  add        Track a file and register it for editing
   view       Preview rendered dotfiles
   list       List configured editable registry components
+  status     Dotfiles repository and apply status
+  upgrade    Run system and dotfile upgrade steps
   lint       Check registries and rendered templates
   audit      Audit live shell configuration
-  outdated   Every tool: installed, pinned and latest versions
-  bump       Update pinned versions and checksums
-  upgrade    Run system and dotfile upgrade steps
+  pkg        Package and pinned release lifecycle
   version    Print version information
   help       Show command help
 

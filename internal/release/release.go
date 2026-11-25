@@ -22,8 +22,9 @@ import (
 
 // Finder looks up the newest published version and checksums downloads.
 type Finder struct {
-	Runner chez.Runner  // runs git ls-remote
-	HTTP   *http.Client // go.dev and the downloads; needs a timeout
+	Runner chez.Runner         // runs git ls-remote
+	HTTP   *http.Client        // go.dev and the downloads; needs a timeout
+	Getenv func(string) string // nil reads nothing
 }
 
 var numeric = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,2}$`)
@@ -32,7 +33,10 @@ var numeric = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,2}$`)
 func (f Finder) Latest(ctx context.Context, up pkgreg.Upstream) (string, error) {
 	switch up.Kind {
 	case "git":
-		out, err := chez.Output(ctx, f.Runner, chez.Cmd{Args: []string{"git", "ls-remote", "--tags", "--refs", up.Repo}})
+		out, err := chez.Output(ctx, f.Runner, chez.Cmd{
+			Args: []string{"git", "ls-remote", "--tags", "--refs", up.Repo},
+			Env:  chez.GitNoPromptEnv(ctx, f.Runner, f.Getenv, ""), // never ask for credentials or a passphrase
+		})
 		if err != nil {
 			return "", fmt.Errorf("list tags of %s: %w", up.Repo, err)
 		}

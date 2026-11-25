@@ -36,7 +36,7 @@ func (s Style) Inventory(w io.Writer, r inventory.Report, now time.Time) {
 	if r.Offline {
 		link = "offline"
 	}
-	fmt.Fprintf(w, "%schezmoi dots outdated — every tool on this machine%s   %s%s · %s · %s%s\n\n", s.B, s.O, s.D, r.OS, r.Role, link, s.O)
+	fmt.Fprintf(w, "%schezmoi dots pkg status — every tool on this machine%s   %s%s · %s · %s%s\n\n", s.B, s.O, s.D, r.OS, r.Role, link, s.O)
 
 	for _, g := range r.Groups {
 		if len(g.Tools) == 0 {

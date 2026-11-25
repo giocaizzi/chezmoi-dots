@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -163,6 +164,26 @@ func NpmOutdated(b []byte) (map[string]string, error) {
 		m[n] = d.Latest
 	}
 	return m, nil
+}
+
+// NpmView reads `npm view <name>@<pin> version --json`: a JSON string, or an
+// array of strings when several versions match. It returns the versions listed.
+func NpmView(b []byte) ([]string, error) {
+	var one string
+	if err := json.Unmarshal(b, &one); err == nil {
+		if one == "" {
+			return nil, errors.New("npm view: no version")
+		}
+		return []string{one}, nil
+	}
+	var many []string
+	if err := json.Unmarshal(b, &many); err != nil {
+		return nil, fmt.Errorf("npm view: %w", err)
+	}
+	if len(many) == 0 {
+		return nil, errors.New("npm view: no version")
+	}
+	return many, nil
 }
 
 // NpmSpec splits an npm spec: "typescript@5" is typescript and 5, "@scope/pkg" is

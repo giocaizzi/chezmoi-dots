@@ -18,8 +18,8 @@ func TestRenderHelpStyles(t *testing.T) {
 		commandName string
 	}{
 		{name: "root", commandName: "edit"},
-		{name: "group", path: "audit", commandName: "aliases"},
-		{name: "leaf", path: "audit aliases"},
+		{name: "group", path: "pkg", commandName: "status"},
+		{name: "leaf", path: "pkg status"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

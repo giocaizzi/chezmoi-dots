@@ -24,7 +24,7 @@ func testGetenv(key string) string {
 
 func TestRunHelp(t *testing.T) {
 	t.Parallel()
-	for _, args := range [][]string{{"-h"}, {"--help"}, {"help"}, {"view", "--help"}, {"audit", "aliases", "-h"}, {"help", "live"}, {"help", "help"}, {"version", "-h"}, {"version", "--help"}, {"version", "extra", "--help"}, {"audit", "--help", "aliases"}, {"audit", "aliases", "--help"}} {
+	for _, args := range [][]string{{"-h"}, {"--help"}, {"help"}, {"view", "--help"}, {"audit", "aliases", "-h"}, {"pkg", "status", "-h"}, {"help", "live"}, {"help", "help"}, {"version", "-h"}, {"version", "--help"}, {"version", "extra", "--help"}, {"audit", "--help", "aliases"}, {"audit", "aliases", "--help"}} {
 		t.Run(strings.Join(args, "/"), func(t *testing.T) {
 			t.Parallel()
 			var out, errw bytes.Buffer
@@ -56,7 +56,7 @@ func TestRunVersionIgnoredArguments(t *testing.T) {
 
 func TestRunUsageNoDuplicateDiagnostic(t *testing.T) {
 	t.Parallel()
-	for _, args := range [][]string{{"list", "pattern"}, {"view", "--unknown"}, {"audit"}, {"help", "audit", "unknown"}} {
+	for _, args := range [][]string{{"list", "pattern"}, {"view", "--unknown"}, {"audit", "other"}, {"pkg"}, {"help", "audit", "unknown"}} {
 		t.Run(strings.Join(args, "/"), func(t *testing.T) {
 			t.Parallel()
 			var out, errw, cliOut, cliErr bytes.Buffer
