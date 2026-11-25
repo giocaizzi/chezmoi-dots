@@ -123,10 +123,7 @@ func (d Deps) pkgStatus(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	pins, err := extpin.Find(src)
-	if err != nil {
-		return fmt.Errorf("read the externals: %w", err)
-	}
+	pins, skips := extpin.Find(src)
 	wt := d.Getenv("CHEZMOI_WORKING_TREE")
 	if wt == "" {
 		wt, _ = cz.WorkingTree(ctx) // unknown is reported by the overview itself
@@ -134,7 +131,7 @@ func (d Deps) pkgStatus(ctx context.Context, args []string) error {
 	rep := survey.Survey{
 		Runner: d.Runner, Latest: d.finder().Latest, Stat: os.Stat, LookPath: d.LookPath,
 		Home: d.Home, GOOS: d.GOOS, WorkingTree: wt, Offline: boolValue(fs, "offline"), Fetch: boolValue(fs, "fetch"),
-		Getenv: d.Getenv, Archives: pins, Head: d.finder().Head,
+		Getenv: d.Getenv, Archives: pins, ArchiveSkips: skips, Head: d.finder().Head,
 	}.Run(ctx, sel)
 	if ctx.Err() != nil {
 		return fmt.Errorf("pkg status: %w", ctx.Err())
@@ -161,9 +158,13 @@ func (d Deps) bump(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	pins, err := extpin.Find(src)
-	if err != nil {
-		return fmt.Errorf("read the externals: %w", err)
+	pins, skips := extpin.Find(src)
+	for _, k := range skips {
+		where := k.File
+		if k.Entry != "" {
+			where += " " + k.Entry
+		}
+		fmt.Fprintf(d.Stderr, "skip %s: %s\n", where, k.Reason)
 	}
 	if rels, pins, err = selectPins(names, rels, pins); err != nil {
 		return err
@@ -190,14 +191,76 @@ func (d Deps) bump(ctx context.Context, args []string) error {
 	case boolValue(fs, "dry-run"):
 		fmt.Fprintln(d.Stdout, "dry run: nothing written")
 	default:
-		for _, f := range order {
-			if err := os.WriteFile(f, []byte(texts[f]), 0o644); err != nil { //nolint:gosec // a source file like the others
-				return fmt.Errorf("write %s: %w", f, err)
-			}
+		if err := writeAll(order, texts, os.Rename); err != nil {
+			return err
 		}
 		fmt.Fprintf(d.Stdout, "pinned in %s; run chezmoi apply to install\n", strings.Join(order, ", "))
 	}
 	return nil
+}
+
+// writeAll replaces each file in files with its text in texts. Every new text is
+// first written to a temp file next to its original (same mode), so nothing is
+// changed unless all of them can be prepared; then each is renamed over its
+// original. A rename that fails leaves the files already renamed in place, and
+// the error names them.
+func writeAll(files []string, texts map[string]string, rename func(oldpath, newpath string) error) error {
+	temps := make([]string, 0, len(files))
+	removeTemps := func(from int) {
+		for _, t := range temps[from:] {
+			_ = os.Remove(t)
+		}
+	}
+	for _, f := range files {
+		tmp, err := writeTemp(f, texts[f])
+		if err != nil {
+			removeTemps(0)
+			return fmt.Errorf("write %s: %w", f, err)
+		}
+		temps = append(temps, tmp)
+	}
+	for i, f := range files {
+		if err := rename(temps[i], f); err != nil {
+			removeTemps(i)
+			if i == 0 {
+				return fmt.Errorf("write %s: %w", f, err)
+			}
+			return fmt.Errorf("write %s: %w (already written: %s)", f, err, strings.Join(files[:i], ", "))
+		}
+	}
+	return nil
+}
+
+// writeTemp writes text to a new temp file beside file, with file's mode, and returns its path.
+func writeTemp(file, text string) (name string, err error) {
+	info, err := os.Stat(file)
+	if err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(file), "."+filepath.Base(file)+".dots-*")
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		if err != nil {
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err = tmp.WriteString(text); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err = tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err = tmp.Close(); err != nil {
+		return "", err
+	}
+	if err = os.Chmod(tmp.Name(), info.Mode().Perm()); err != nil {
+		return "", err
+	}
+	return tmp.Name(), nil
 }
 
 // selectPins keeps the releases and archive pins the names select (all without names);

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -350,6 +351,93 @@ func TestPkgBumpUnknownPin(t *testing.T) {
 	}
 	if out.Len() != 0 {
 		t.Errorf("printed %q before the usage error", out.String())
+	}
+}
+
+const sha512Entry = "[\".vim/pack/other\"]\n    url = \"https://github.com/octocat/other/archive/" + oldCommit +
+	".tar.gz\"\n    checksum.sha512 = \"x\"\n"
+
+// withSkippedEntry adds an externals file whose entry bump cannot handle and returns its path.
+func withSkippedEntry(t *testing.T, src string) string {
+	t.Helper()
+	dir := filepath.Join(src, ".chezmoiexternals")
+	if err := os.Mkdir(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "other.toml")
+	if err := os.WriteFile(file, []byte(sha512Entry), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return file
+}
+
+func TestPkgBumpPrintsSkips(t *testing.T) {
+	t.Parallel()
+	src, file := archiveSource(t, externalsText(oldCommit, oldSum))
+	other := withSkippedEntry(t, src)
+	var out, errOut bytes.Buffer
+	d, _, _ := archiveDeps(t, src, newCommit, &out)
+	d.Stderr = &errOut
+	if err := cli.Run(t.Context(), d, []string{"pkg", "bump"}); err != nil {
+		t.Fatalf("Run(pkg bump) with a skipped entry: %v", err)
+	}
+	want := "skip " + other + " \".vim/pack/other\": checksum sha512 is not supported; bump it by hand\n"
+	if diff := cmp.Diff(want, errOut.String()); diff != "" {
+		t.Errorf("stderr (-want +got):\n%s", diff)
+	}
+	got, err := os.ReadFile(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != sha512Entry {
+		t.Errorf("skipped file changed:\n%s", got)
+	}
+	bumped, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(bumped), newCommit) {
+		t.Errorf("the pinned entry was not bumped:\n%s", bumped)
+	}
+}
+
+func TestPkgStatusReportsSkips(t *testing.T) {
+	t.Parallel()
+	src, _ := archiveSource(t, externalsText(oldCommit, oldSum))
+	withSkippedEntry(t, src)
+	var out bytes.Buffer
+	d, _, _ := archiveDeps(t, src, oldCommit, &out)
+	if err := cli.Run(t.Context(), d, []string{"pkg", "status", "--offline"}); err != nil {
+		t.Fatalf("Run(pkg status): %v", err)
+	}
+	if want := "skipped 1: \".vim/pack/other\": checksum sha512";!strings.Contains(out.String(), want) {
+		t.Errorf("report lacks %q:\n%s", want, out.String())
+	}
+}
+
+func TestPkgStatusSurvivesUnreadableDir(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("Unix permissions do not apply")
+	}
+	src, _ := archiveSource(t, externalsText(oldCommit, oldSum))
+	locked := filepath.Join(src, "locked")
+	if err := os.Mkdir(locked, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o750) })
+	var out bytes.Buffer
+	d, _, _ := archiveDeps(t, src, oldCommit, &out)
+	if err := cli.Run(t.Context(), d, []string{"pkg", "status", "--offline"}); err != nil {
+		t.Fatalf("Run(pkg status) with an unreadable dir: %v", err)
+	}
+	for _, want := range []string{"octocat/example", "skipped 1: " + locked} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("report lacks %q:\n%s", want, out.String())
+		}
 	}
 }
 
