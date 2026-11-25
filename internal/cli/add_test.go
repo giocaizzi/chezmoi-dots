@@ -162,10 +162,8 @@ func TestAddDirectory(t *testing.T) {
 			t.Error("a rejected add ran chezmoi add on the directory")
 		}
 	})
-	t.Run("xfail: a symlink to a folder is a file for chezmoi add, not a folder", func(t *testing.T) {
+	t.Run("a symlink to a folder is a file for chezmoi add, not a folder", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: addTarget uses os.Stat, which follows the link, so a symlink to a folder is " +
-			"rejected as a folder; chezmoi add would add it as symlink_<name>. Use os.Lstat")
 		e := newEnv(t)
 		e.isolate(t)
 		e.file(t, e.dest, filepath.Join("real", "a.conf"), "a\n")
@@ -347,11 +345,8 @@ func TestAddGitAutoCommit(t *testing.T) {
 
 func TestAddGitAutoPushFailure(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: a failed autoPush keeps the committed entry", func(t *testing.T) {
+	t.Run("a failed autoPush keeps the committed entry", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: chezmoi add commits the file and the entry, then the push fails; track restores " +
-			"edit.toml anyway, so the worktree drops the committed entry (M .chezmoidata/edit.toml). " +
-			"Restore only when chezmoi add did not create the source file")
 		e := newEnv(t)
 		e.isolate(t)
 		e.gitEnv(t)

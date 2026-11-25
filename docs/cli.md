@@ -99,15 +99,18 @@ chezmoi dots add [--name <name>] [--desc <text>] [--template] [--encrypt] [--loc
 Bring a file under chezmoi and register it in the edit registry in one step.
 `path` is a target path: `~/` expands to the home directory and relative paths
 resolve from the current directory. A folder is rejected (usage error, exit 2)
-before anything changes: use `--local` to register a folder, or add one file.
+before anything changes: use `--local` to register a folder, or add one file. A
+symlink is added as a symlink, even when it points at a folder.
 If chezmoi does not manage the file yet, `add` asks `chezmoi add` (dry run) which
 source file it would create, appends the `[edit.<name>]` entry with `desc` and
 `source` to `.chezmoidata/edit.toml`, and only then runs the real `chezmoi add`
 (forwarding `--template` and `--encrypt`). The entry comes first so that
 chezmoi's `git.autoAdd`, `git.autoCommit` and `git.autoPush` commit and push the
 source file and its entry together; as with every `chezmoi add`, that automation
-stages every pending change in the source. If `chezmoi add` fails, the registry
-file is restored. Afterwards `add` validates the whole registry; findings exit 1
+stages every pending change in the source. If `chezmoi add` fails before it
+created the source file, the registry file is restored; if it failed afterwards
+(for example a failed `git.autoPush` after the commit), the entry stays with the
+added file. Afterwards `add` validates the whole registry; findings exit 1
 and the entry is kept.
 
 Registering a file chezmoi already manages, or a `--local` folder, runs no

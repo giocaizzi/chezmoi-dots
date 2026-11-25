@@ -232,7 +232,7 @@ func (d Deps) addTarget(ctx context.Context, cz *chez.Client, reg registry.Regis
 		return "local", rel, "", nil
 	}
 
-	info, statErr := os.Stat(abs)
+	info, statErr := os.Lstat(abs) // a symlink to a folder is added as a symlink, not walked
 	if statErr == nil && info.IsDir() {
 		return "", "", "", fmt.Errorf("%w: %s is a folder; use --local to register a folder, or add one file", ErrUsage, abs)
 	}
@@ -275,6 +275,11 @@ func (d Deps) track(ctx context.Context, cz *chez.Client, src, file, abs, name, 
 		return "", err
 	}
 	if err = cz.Add(ctx, d.Stderr, d.Stderr, abs, flags...); err != nil {
+		// chezmoi add can fail after it created the source file (a failed autoPush
+		// after the commit): the entry then belongs with it and stays.
+		if _, serr := os.Lstat(filepath.Join(src, filepath.FromSlash(planned))); serr == nil {
+			return "", fmt.Errorf("%w (%s was added, so its entry %s stays in %s)", err, planned, name, file)
+		}
 		return "", errors.Join(err, restoreRegistry(file, old, existed))
 	}
 	sp, err := cz.SourcePath(ctx, abs, nil)
