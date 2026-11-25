@@ -25,6 +25,10 @@ func TestToolState(t *testing.T) {
 		{"package latest beyond its pin", Npm, Tool{Installed: "5.1.0", Pinned: "5", Latest: "6.0.0"}, UpToDate},
 		{"package outdated within its pin", Npm, Tool{Installed: "5.1.0", Pinned: "5", Latest: "5.2.0"}, Outdated},
 		{"package offline", UV, Tool{Installed: "1.0"}, Unknown},
+		{"archive up to date", Archive, Tool{Pinned: "aaaa", Latest: "aaaa"}, UpToDate},
+		{"archive outdated", Archive, Tool{Pinned: "aaaa", Latest: "bbbb"}, Outdated},
+		{"archive unknown latest", Archive, Tool{Pinned: "aaaa"}, Unknown},
+		{"archive ignores installed and missing", Archive, Tool{Pinned: "aaaa", Latest: "aaaa", Missing: true, Installed: "x"}, UpToDate},
 		{"package installed unknown", Apt, Tool{Latest: "1.0"}, Unknown},
 	}
 	for _, tt := range tests {

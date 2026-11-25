@@ -39,6 +39,12 @@ func TestCountsAndFailing(t *testing.T) {
 			true,
 		},
 		{
+			"outdated archive",
+			inventory.Report{Groups: []inventory.Group{{Source: inventory.Archive, Tools: []inventory.Tool{{Name: "octocat/example", Pinned: "aaaa", Latest: "bbbb"}}}}},
+			map[inventory.State]int{inventory.Outdated: 1},
+			true,
+		},
+		{
 			"unknown only",
 			inventory.Report{Groups: []inventory.Group{{Source: inventory.UV, Tools: []inventory.Tool{{Name: "d", Installed: "1"}}}}},
 			map[inventory.State]int{inventory.Unknown: 1},
@@ -76,6 +82,11 @@ func TestHints(t *testing.T) {
 		{Name: "a", Installed: "1", Latest: "2"},
 		{Name: "z", Missing: true},
 	}}
+	arc := inventory.Group{Source: inventory.Archive, Tools: []inventory.Tool{
+		{Name: "octocat/c", Pinned: "1", Latest: "2"},
+		{Name: "octocat/b", Pinned: "1", Latest: "2"},
+		{Name: "octocat/a", Pinned: "1", Latest: "1"},
+	}}
 	script := inventory.Group{Source: inventory.Script, Tools: []inventory.Tool{{Name: "bun", Missing: true}}}
 	tests := []struct {
 		name string
@@ -90,6 +101,15 @@ func TestHints(t *testing.T) {
 			{"git push", "1 local commit not on origin/main"},
 		}},
 		{"no upstream", inventory.Report{Tree: inventory.Tree{Known: true}}, nil},
+		{"archives", inventory.Report{Groups: []inventory.Group{rel, arc}}, []inventory.Hint{
+			{"chezmoi dots pkg bump alpha zeta", "pin the newer releases"},
+			{"chezmoi dots pkg bump octocat/b octocat/c", "pin the newer commits"},
+			{"chezmoi apply", "install the pinned drift, gone"},
+		}},
+		{"one archive", inventory.Report{Groups: []inventory.Group{{Source: inventory.Archive, Tools: []inventory.Tool{{Name: "octocat/a", Pinned: "1", Latest: "2"}}}}}, []inventory.Hint{
+			{"chezmoi dots pkg bump octocat/a", "pin the newer commit"},
+		}},
+		{"archives never missing", inventory.Report{Groups: []inventory.Group{{Source: inventory.Archive, Tools: []inventory.Tool{{Name: "octocat/a", Missing: true}}}}}, nil},
 		{"all", inventory.Report{Groups: []inventory.Group{rel, brew, npm, script}, Tree: inventory.Tree{Known: true, Upstream: "origin/main", Fetched: fetched}}, []inventory.Hint{
 			{"chezmoi dots pkg bump alpha zeta", "pin the newer releases"},
 			{"chezmoi apply", "install the pinned drift, gone"},

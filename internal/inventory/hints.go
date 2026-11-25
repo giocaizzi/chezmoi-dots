@@ -70,6 +70,9 @@ func (r Report) toolHints() []Hint {
 	if n := r.names(Release, Outdated); len(n) > 0 {
 		add("chezmoi dots pkg bump "+strings.Join(n, " "), "pin the newer "+plural(len(n), "release"))
 	}
+	if n := r.names(Archive, Outdated); len(n) > 0 {
+		add("chezmoi dots pkg bump "+strings.Join(n, " "), "pin the newer "+plural(len(n), "commit"))
+	}
 	if n := r.names(Release, Drifted, Missing); len(n) > 0 {
 		add("chezmoi apply", "install the pinned "+strings.Join(n, ", "))
 	}
@@ -83,7 +86,7 @@ func (r Report) toolHints() []Hint {
 	}
 	var missing []string
 	for _, s := range Sources() {
-		if s != Release {
+		if s != Release && s != Archive {
 			missing = append(missing, r.names(s, Missing)...)
 		}
 	}
