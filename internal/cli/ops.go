@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
 	"github.com/giocaizzi/chezmoi-dots/internal/edit"
+	"github.com/giocaizzi/chezmoi-dots/internal/extpin"
 	"github.com/giocaizzi/chezmoi-dots/internal/inventory"
 	"github.com/giocaizzi/chezmoi-dots/internal/lint"
 	"github.com/giocaizzi/chezmoi-dots/internal/pkgreg"
@@ -72,12 +74,8 @@ func (d Deps) finder() release.Finder {
 	return release.Finder{Runner: d.Runner, HTTP: d.HTTP, Getenv: d.Getenv}
 }
 
-func (d Deps) releases(ctx context.Context) (string, []pkgreg.Release, error) {
-	cz, _ := d.chezmoi()
-	src, err := d.sourceDir(ctx, cz)
-	if err != nil {
-		return "", nil, err
-	}
+// releases reads the release table of the source at src and the path of the file that holds it.
+func (d Deps) releases(ctx context.Context, cz *chez.Client, src string) (string, []pkgreg.Release, error) {
 	data, err := cz.Data(ctx, nil)
 	if err != nil {
 		return "", nil, err
@@ -121,6 +119,14 @@ func (d Deps) pkgStatus(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("read the package selection: %w", err)
 	}
+	src, err := d.sourceDir(ctx, cz)
+	if err != nil {
+		return err
+	}
+	pins, err := extpin.Find(src)
+	if err != nil {
+		return fmt.Errorf("read the externals: %w", err)
+	}
 	wt := d.Getenv("CHEZMOI_WORKING_TREE")
 	if wt == "" {
 		wt, _ = cz.WorkingTree(ctx) // unknown is reported by the overview itself
@@ -128,7 +134,7 @@ func (d Deps) pkgStatus(ctx context.Context, args []string) error {
 	rep := survey.Survey{
 		Runner: d.Runner, Latest: d.finder().Latest, Stat: os.Stat, LookPath: d.LookPath,
 		Home: d.Home, GOOS: d.GOOS, WorkingTree: wt, Offline: boolValue(fs, "offline"), Fetch: boolValue(fs, "fetch"),
-		Getenv: d.Getenv,
+		Getenv: d.Getenv, Archives: pins, Head: d.finder().Head,
 	}.Run(ctx, sel)
 	if ctx.Err() != nil {
 		return fmt.Errorf("pkg status: %w", ctx.Err())
@@ -146,51 +152,197 @@ func (d Deps) bump(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	file, rels, err := d.releases(ctx)
+	cz, _ := d.chezmoi()
+	src, err := d.sourceDir(ctx, cz)
 	if err != nil {
 		return err
 	}
-	if len(names) > 0 {
-		rels = slices.DeleteFunc(rels, func(r pkgreg.Release) bool { return !slices.Contains(names, r.Name) })
-		if len(rels) != len(names) {
-			return &commandError{command: cmdPkgBump, err: fmt.Errorf("%w: unknown pin in %v", ErrUsage, names)}
+	file, rels, err := d.releases(ctx, cz, src)
+	if err != nil {
+		return err
+	}
+	pins, err := extpin.Find(src)
+	if err != nil {
+		return fmt.Errorf("read the externals: %w", err)
+	}
+	if rels, pins, err = selectPins(names, rels, pins); err != nil {
+		return err
+	}
+	texts := map[string]string{} // updated text of every changed file
+	var order []string
+	if len(rels) > 0 {
+		updated, n, rerr := d.bumpReleases(ctx, rels, file)
+		if rerr != nil {
+			return rerr
+		}
+		if n > 0 {
+			texts[file], order = updated, append(order, file)
 		}
 	}
-	text, err := os.ReadFile(file) //nolint:gosec // file is the package registry in the user's own dotfiles source
+	changed, err := d.bumpArchives(ctx, pins, texts)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", file, err)
+		return err
 	}
-	updated, f := string(text), d.finder()
+	order = append(order, changed...)
+	switch {
+	case len(order) == 0:
+		fmt.Fprintln(d.Stdout, "all pins are up to date")
+	case boolValue(fs, "dry-run"):
+		fmt.Fprintln(d.Stdout, "dry run: nothing written")
+	default:
+		for _, f := range order {
+			if err := os.WriteFile(f, []byte(texts[f]), 0o644); err != nil { //nolint:gosec // a source file like the others
+				return fmt.Errorf("write %s: %w", f, err)
+			}
+		}
+		fmt.Fprintf(d.Stdout, "pinned in %s; run chezmoi apply to install\n", strings.Join(order, ", "))
+	}
+	return nil
+}
+
+// selectPins keeps the releases and archive pins the names select (all without names);
+// a name that selects neither is a usage error.
+func selectPins(names []string, rels []pkgreg.Release, pins []extpin.Pin) ([]pkgreg.Release, []extpin.Pin, error) {
+	if len(names) == 0 {
+		return rels, pins, nil
+	}
+	for _, n := range names {
+		if !slices.ContainsFunc(rels, func(r pkgreg.Release) bool { return r.Name == n }) &&
+			!slices.ContainsFunc(pins, func(p extpin.Pin) bool { return p.Name() == n }) {
+			return nil, nil, &commandError{command: cmdPkgBump, err: fmt.Errorf("%w: unknown pin in %v", ErrUsage, names)}
+		}
+	}
+	rels = slices.DeleteFunc(rels, func(r pkgreg.Release) bool { return !slices.Contains(names, r.Name) })
+	pins = slices.DeleteFunc(pins, func(p extpin.Pin) bool { return !slices.Contains(names, p.Name()) })
+	return rels, pins, nil
+}
+
+// bumpReleases moves the outdated releases in the text of packages.toml and returns the new text and how many moved.
+func (d Deps) bumpReleases(ctx context.Context, rels []pkgreg.Release, file string) (string, int, error) {
+	raw, err := os.ReadFile(file) //nolint:gosec // file is the package registry in the user's own dotfiles source
+	if err != nil {
+		return "", 0, fmt.Errorf("read %s: %w", file, err)
+	}
+	updated, f := string(raw), d.finder()
 	bumped := 0
 	for _, s := range f.Check(ctx, rels) {
 		if s.Err != nil {
-			return fmt.Errorf("release %s: %w", s.Release.Name, s.Err)
+			return "", 0, fmt.Errorf("release %s: %w", s.Release.Name, s.Err)
 		}
 		if !s.Outdated() {
 			continue
 		}
 		sums, err := f.Sums(ctx, s.Release, s.Latest)
 		if err != nil {
-			return err
+			return "", 0, err
 		}
 		if updated, err = pkgreg.SetRelease(updated, s.Release.Name, s.Latest, sums); err != nil {
-			return err
+			return "", 0, err
 		}
 		bumped++
 		fmt.Fprintf(d.Stdout, "%s %s → %s\n", s.Release.Name, s.Release.Version, s.Latest)
 	}
-	switch {
-	case bumped == 0:
-		fmt.Fprintln(d.Stdout, "all releases are up to date")
-	case boolValue(fs, "dry-run"):
-		fmt.Fprintln(d.Stdout, "dry run: nothing written")
-	default:
-		if err := os.WriteFile(file, []byte(updated), 0o644); err != nil { //nolint:gosec // a source file like the others
-			return fmt.Errorf("write %s: %w", file, err)
+	return updated, bumped, nil
+}
+
+// archiveBumper moves archive pins to their remote HEAD, remembering what it looked up.
+type archiveBumper struct {
+	f       release.Finder
+	texts   map[string]string // updated text of the externals files, read on first use
+	heads   map[string]string // remote -> HEAD commit
+	sums    map[string]string // archive URL -> SHA-256
+	printed map[string]bool
+	out     io.Writer
+	changed []string
+}
+
+// head returns the HEAD commit of the pin's remote, asking the remote once.
+func (b *archiveBumper) head(ctx context.Context, p extpin.Pin) (string, error) {
+	if h, ok := b.heads[p.Remote()]; ok {
+		return h, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	h, err := b.f.Head(ctx, p.Remote())
+	if err != nil {
+		return "", err
+	}
+	b.heads[p.Remote()] = h
+	return h, nil
+}
+
+// sum downloads the archive of p at head once.
+func (b *archiveBumper) sum(ctx context.Context, p extpin.Pin, head string) (string, error) {
+	url := p.URLAt(head)
+	if s, ok := b.sums[url]; ok {
+		return s, nil
+	}
+	s, err := b.f.SHA256(ctx, url)
+	if err != nil {
+		return "", err
+	}
+	b.sums[url] = s
+	return s, nil
+}
+
+// text returns the current text of an externals file.
+func (b *archiveBumper) text(file string) (string, error) {
+	if t, ok := b.texts[file]; ok {
+		return t, nil
+	}
+	raw, err := os.ReadFile(file) //nolint:gosec // an externals file in the user's own dotfiles source
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", file, err)
+	}
+	return string(raw), nil
+}
+
+// bump moves p when it is behind its remote HEAD.
+func (b *archiveBumper) bump(ctx context.Context, p extpin.Pin) error {
+	head, err := b.head(ctx, p)
+	if err != nil {
+		return err
+	}
+	if head == p.SHA {
+		return nil
+	}
+	sum := ""
+	if p.Sum != "" {
+		if sum, err = b.sum(ctx, p, head); err != nil {
+			return err
 		}
-		fmt.Fprintf(d.Stdout, "pinned in %s; run chezmoi apply to install\n", file)
+	}
+	text, err := b.text(p.File)
+	if err != nil {
+		return err
+	}
+	if text, err = extpin.Set(text, p, head, sum); err != nil {
+		return err
+	}
+	b.texts[p.File] = text
+	if !slices.Contains(b.changed, p.File) {
+		b.changed = append(b.changed, p.File)
+	}
+	if line := fmt.Sprintf("%s %s → %s\n", p.Name(), p.SHA[:7], head[:7]); !b.printed[line] {
+		b.printed[line] = true
+		fmt.Fprint(b.out, line)
 	}
 	return nil
+}
+
+// bumpArchives moves every archive pin that is behind its remote HEAD, editing the
+// externals files in texts. It returns the files it changed.
+func (d Deps) bumpArchives(ctx context.Context, pins []extpin.Pin, texts map[string]string) ([]string, error) {
+	b := &archiveBumper{
+		f: d.finder(), texts: texts, heads: map[string]string{}, sums: map[string]string{},
+		printed: map[string]bool{}, out: d.Stdout,
+	}
+	for _, p := range pins {
+		if err := b.bump(ctx, p); err != nil {
+			return nil, fmt.Errorf("archive %s: %w", p.Name(), err)
+		}
+	}
+	return b.changed, nil
 }
 
 func (d Deps) upgrade(ctx context.Context, args []string) error {

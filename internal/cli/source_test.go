@@ -102,7 +102,7 @@ func TestBumpSourceDir(t *testing.T) {
 			if diff := cmp.Diff(tt.wantSubs, fake.subs); diff != "" {
 				t.Errorf("chezmoi calls (-want +got):\n%s", diff)
 			}
-			if err == nil && !strings.Contains(out.String(), "all releases are up to date\n") {
+			if err == nil && !strings.Contains(out.String(), "all pins are up to date\n") {
 				t.Errorf("pkg bump output = %q, want it to read the registry", out.String())
 			}
 		})
