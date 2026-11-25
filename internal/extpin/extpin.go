@@ -18,7 +18,7 @@ import (
 // Pin is one external whose archive URL names a commit.
 type Pin struct {
 	File  string // the externals file it was found in
-	Entry string // the external's TOML table key as written, e.g. `".vim/pack/plugins/start/example"`
+	Entry string // the external's TOML table key, whitespace outside quotes removed, e.g. `".vim/pack/plugins/start/example"`
 	Host  string // "github.com", or the GitLab host
 	Repo  string // repository path on Host: "octocat/example", "group/sub/example"
 	URL   string // the archive URL as written
@@ -38,51 +38,119 @@ func (p Pin) Remote() string { return "https://" + p.Host + "/" + p.Repo + ".git
 // URLAt is the archive URL with the commit replaced by sha.
 func (p Pin) URLAt(sha string) string { return strings.ReplaceAll(p.URL, p.SHA, sha) }
 
+// Skip is an externals entry or path that holds a commit archive but is not handled, and why.
+type Skip struct {
+	File   string
+	Entry  string // "" when the whole file or directory could not be read
+	Reason string
+}
+
 var (
-	header   = regexp.MustCompile(`^\s*\[(.+)\]\s*$`)
 	githubRe = regexp.MustCompile(`https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/archive/([0-9a-f]{40})\.tar\.gz`)
 	gitlabRe = regexp.MustCompile(`https://([A-Za-z0-9.-]+)/([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+)/-/archive/([0-9a-f]{40})/[A-Za-z0-9_.-]*\.tar\.gz`)
 	sumRe    = regexp.MustCompile(`\bsha256\s*=\s*"([0-9a-fA-F]{64})"`)
+	otherRe  = regexp.MustCompile(`\b(sha384|sha512|size)\s*=`)
 	shaOK    = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	sumOK    = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 // entry collects what one TOML table holds while Scan walks the lines.
 type entry struct {
-	key   string
-	urls  []Pin
-	sums  []string
-	lines []int // lines of sums
+	key    string
+	urls   []Pin
+	sums   []string
+	lines  []int    // lines of sums
+	others []string // other checksum keys: sha384, sha512, size
 }
 
-func (e *entry) pin() (Pin, bool) {
-	if e == nil || len(e.urls) != 1 || len(e.sums) > 1 {
-		return Pin{}, false
+// result is the pin the entry holds, or why it is not one. An entry without an
+// archive URL is neither.
+func (e *entry) result() (*Pin, *Skip) {
+	if e == nil || len(e.urls) == 0 {
+		return nil, nil
 	}
 	p := e.urls[0]
+	skip := func(reason string) (*Pin, *Skip) {
+		return nil, &Skip{File: p.File, Entry: e.key, Reason: reason}
+	}
+	switch {
+	case len(e.urls) > 1:
+		return skip("more than one archive URL")
+	case len(e.others) > 0:
+		return skip(fmt.Sprintf("checksum %s is not supported; bump it by hand", e.others[0]))
+	case len(e.sums) > 1:
+		return skip("more than one sha256")
+	}
 	p.Entry = e.key
 	p.sumLine = -1
 	if len(e.sums) == 1 {
 		p.Sum, p.sumLine = e.sums[0], e.lines[0]
 	}
-	return p, true
+	return &p, nil
+}
+
+// parseHeader reads a TOML table header line (not an array of tables), allowing
+// spaces inside the brackets and around dots and a trailing comment. The key it
+// returns has the whitespace outside quotes removed.
+func parseHeader(line string) (string, bool) {
+	s := strings.TrimSpace(line)
+	if !strings.HasPrefix(s, "[") || strings.HasPrefix(s, "[[") {
+		return "", false
+	}
+	var key strings.Builder
+	for i := 1; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\'':
+			key.WriteByte(c)
+			for i++; ; i++ {
+				if i >= len(s) {
+					return "", false // unterminated quote
+				}
+				if c == '"' && s[i] == '\\' && i+1 < len(s) {
+					key.WriteByte(s[i])
+					key.WriteByte(s[i+1])
+					i++
+					continue
+				}
+				key.WriteByte(s[i])
+				if s[i] == c {
+					break
+				}
+			}
+		case c == ' ' || c == '\t':
+		case c == ']':
+			rest := strings.TrimSpace(s[i+1:])
+			return key.String(), key.Len() > 0 && (rest == "" || rest[0] == '#')
+		case c == '.' || c == '_' || c == '-' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z':
+			key.WriteByte(c)
+		default:
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // Scan finds the pins in the text of one externals file; file is recorded in each.
-func Scan(file, text string) []Pin {
+// An entry that holds a commit archive but cannot be bumped safely is a Skip.
+func Scan(file, text string) ([]Pin, []Skip) {
 	var pins []Pin
+	var skips []Skip
 	var cur *entry
 	flush := func() {
-		if p, ok := cur.pin(); ok {
-			pins = append(pins, p)
+		p, skip := cur.result()
+		if p != nil {
+			pins = append(pins, *p)
+		}
+		if skip != nil {
+			skips = append(skips, *skip)
 		}
 	}
 	for i, line := range strings.Split(text, "\n") {
 		line = strings.TrimSuffix(line, "\r")
-		if m := header.FindStringSubmatch(line); m != nil && !strings.HasPrefix(strings.TrimSpace(line), "[[") {
-			if cur == nil || !strings.HasPrefix(m[1], cur.key+".") {
+		if key, ok := parseHeader(line); ok {
+			if cur == nil || !strings.HasPrefix(key, cur.key+".") {
 				flush()
-				cur = &entry{key: m[1]}
+				cur = &entry{key: key}
 			}
 			continue
 		}
@@ -98,18 +166,27 @@ func Scan(file, text string) []Pin {
 			cur.sums = append(cur.sums, m[1])
 			cur.lines = append(cur.lines, i)
 		}
+		if m := otherRe.FindStringSubmatch(line); m != nil && !slices.Contains(cur.others, m[1]) {
+			cur.others = append(cur.others, m[1])
+		}
 	}
 	flush()
-	return pins
+	return pins, skips
 }
 
 // Find scans every TOML externals file under the source dir src, sorted by file
-// and then by line.
-func Find(src string) ([]Pin, error) {
+// and then by line. It never fails: an unreadable directory or file, or a missing
+// src, is a Skip and the walk goes on.
+func Find(src string) ([]Pin, []Skip) {
 	var pins []Pin
-	err := filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+	var skips []Skip
+	_ = filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error { // errors are collected as skips
 		if err != nil {
-			return err
+			skips = append(skips, Skip{File: path, Reason: "cannot read: " + err.Error()})
+			if d == nil || d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			if d.Name() == ".git" {
@@ -122,18 +199,17 @@ func Find(src string) ([]Pin, error) {
 		}
 		b, err := os.ReadFile(path) //nolint:gosec // path comes from walking the caller's source dir
 		if err != nil {
-			return fmt.Errorf("read %s: %w", path, err)
+			skips = append(skips, Skip{File: path, Reason: "cannot read: " + err.Error()})
+			return nil
 		}
-		pins = append(pins, Scan(path, string(b))...)
+		ps, ss := Scan(path, string(b))
+		pins, skips = append(pins, ps...), append(skips, ss...)
 		return nil
 	})
-	if err != nil {
-		return nil, fmt.Errorf("find externals in %s: %w", src, err)
-	}
 	slices.SortStableFunc(pins, func(a, b Pin) int {
 		return cmp.Or(strings.Compare(a.File, b.File), cmp.Compare(a.line, b.line))
 	})
-	return pins, nil
+	return pins, skips
 }
 
 func isExternals(path string) bool {
@@ -154,7 +230,7 @@ func Set(text string, p Pin, sha, sum string) (string, error) {
 	if sum != "" && !sumOK.MatchString(sum) {
 		return "", fmt.Errorf("pin %s in %s: invalid sha256 %q", p.Name(), p.File, sum)
 	}
-	pins := Scan(p.File, text)
+	pins, _ := Scan(p.File, text)
 	i := slices.IndexFunc(pins, func(c Pin) bool { return c.Entry == p.Entry && c.SHA == p.SHA })
 	if i < 0 {
 		return "", fmt.Errorf("pin %s in %s: not found", p.Name(), p.File)
