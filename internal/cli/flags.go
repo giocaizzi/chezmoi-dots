@@ -1,6 +1,9 @@
 package cli
 
-import "flag"
+import (
+	"errors"
+	"flag"
+)
 
 func newFlags(name string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
@@ -23,6 +26,20 @@ func newFlags(name string) *flag.FlagSet {
 		fs.Bool("check", false, "exit non-zero for outdated, drifted or missing tools")
 	case cmdPkgBump:
 		fs.Bool("dry-run", false, "show what would change, write nothing")
+	case cmdPkgAdd:
+		fs.Var(&optValue{}, "brew", "install with brew; --brew=<formula> when the formula differs from the name")
+		fs.String("cask", "", "install with brew cask `name`")
+		fs.Var(&optValue{}, "apt", "install with apt; --apt=<package> when the package differs from the name")
+		fs.String("winget", "", "install with winget `id`")
+		fs.Var(&optValue{}, "uv", "install with uv tool; --uv=<spec> when the spec differs from the name")
+		fs.Var(&optValue{}, "npm", "install with npm; --npm=<spec> when the spec differs from the name")
+		fs.String("roles", "", "limit to `roles` (comma list of personal, work, light)")
+		fs.String("requires", "", "install only when this [data] `answer` is set")
+		fs.Bool("release", false, "add a pinned release binary instead of a package")
+		fs.String("version", "", "release `version` to pin")
+		fs.String("url", "", "release download `template` with {version} (and {target})")
+		fs.Var(new(stringList), "target", "repeatable release `os/arch=name` target")
+		fs.Bool("dry-run", false, "print the entry, write nothing and download nothing")
 	case cmdUpgrade:
 		fs.Bool("dry-run", false, "show upgrade commands without executing upgrade steps")
 	case cmdLive:
@@ -35,6 +52,46 @@ func newFlags(name string) *flag.FlagSet {
 		fs.Var(new(stringList), "global", "repeatable chezmoi global `argument`")
 	}
 	return fs
+}
+
+// optValue is a flag whose value is optional: bare, it stands for the package name;
+// with =<value>, for that value.
+type optValue struct {
+	set bool
+	val string
+}
+
+func (o *optValue) String() string {
+	if o == nil {
+		return ""
+	}
+	return o.val
+}
+
+func (o *optValue) Set(v string) error {
+	if v == "" {
+		return errors.New("needs a value after =")
+	}
+	o.set = true
+	o.val = ""
+	if v != "true" { // the flag package passes "true" for the bare form
+		o.val = v
+	}
+	return nil
+}
+
+// IsBoolFlag lets the flag stand without a value, so a following word stays positional.
+func (*optValue) IsBoolFlag() bool { return true }
+
+// resolve is the flag's value, with name standing for a bare flag; empty when unset.
+func (o *optValue) resolve(name string) string {
+	switch {
+	case o == nil || !o.set:
+		return ""
+	case o.val == "":
+		return name
+	}
+	return o.val
 }
 
 func boolValue(fs *flag.FlagSet, name string) bool {

@@ -49,6 +49,7 @@ const (
 	cmdPkg      = "pkg"
 	cmdPkgState = "pkg status"
 	cmdPkgBump  = "pkg bump"
+	cmdPkgAdd   = "pkg add"
 	cmdUpgrade  = "upgrade"
 	cmdLive     = "live"
 	cmdVersion  = "version"

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -86,17 +87,19 @@ func (d Deps) releases(ctx context.Context, cz *chez.Client, src string) (string
 // pkg dispatches the package lifecycle subcommands; the subcommand is the first token.
 func (d Deps) pkg(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return &commandError{command: cmdPkg, err: fmt.Errorf("%w: pkg needs a command (status, bump)", ErrUsage)}
+		return &commandError{command: cmdPkg, err: fmt.Errorf("%w: pkg needs a command (status, bump, add)", ErrUsage)}
 	}
 	switch args[0] {
 	case "status":
 		return d.pkgStatus(ctx, args[1:])
 	case "bump":
 		return d.bump(ctx, args[1:])
+	case "add":
+		return d.pkgAdd(ctx, args[1:])
 	case "-h", "--help":
 		return &commandError{command: cmdPkg, err: flag.ErrHelp}
 	default:
-		return &commandError{command: cmdPkg, err: fmt.Errorf("%w: unknown pkg command %q (commands: status, bump)", ErrUsage, args[0])}
+		return &commandError{command: cmdPkg, err: fmt.Errorf("%w: unknown pkg command %q (commands: status, bump, add)", ErrUsage, args[0])}
 	}
 }
 
@@ -205,6 +208,12 @@ func (d Deps) bump(ctx context.Context, args []string) error {
 // original. A rename that fails leaves the files already renamed in place, and
 // the error names them.
 func writeAll(files []string, texts map[string]string, rename func(oldpath, newpath string) error) error {
+	return writeFiles(files, texts, rename, 0)
+}
+
+// writeFiles is writeAll that, when create is not zero, also writes a file that does
+// not exist yet, with that mode.
+func writeFiles(files []string, texts map[string]string, rename func(oldpath, newpath string) error, create os.FileMode) error {
 	temps := make([]string, 0, len(files))
 	removeTemps := func(from int) {
 		for _, t := range temps[from:] {
@@ -212,7 +221,7 @@ func writeAll(files []string, texts map[string]string, rename func(oldpath, newp
 		}
 	}
 	for _, f := range files {
-		tmp, err := writeTemp(f, texts[f])
+		tmp, err := writeTemp(f, texts[f], create)
 		if err != nil {
 			removeTemps(0)
 			return fmt.Errorf("write %s: %w", f, err)
@@ -232,9 +241,14 @@ func writeAll(files []string, texts map[string]string, rename func(oldpath, newp
 }
 
 // writeTemp writes text to a new temp file beside file, with file's mode, and returns its path.
-func writeTemp(file, text string) (name string, err error) {
+// A file that does not exist gets the create mode, or is an error when that is zero.
+func writeTemp(file, text string, create os.FileMode) (name string, err error) {
+	mode := create
 	info, err := os.Stat(file)
-	if err != nil {
+	switch {
+	case err == nil:
+		mode = info.Mode().Perm()
+	case create == 0 || !errors.Is(err, os.ErrNotExist):
 		return "", fmt.Errorf("prepare: %w", err)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(file), "."+filepath.Base(file)+".dots-*")
@@ -257,7 +271,7 @@ func writeTemp(file, text string) (name string, err error) {
 	if err = tmp.Close(); err != nil {
 		return "", fmt.Errorf("prepare: %w", err)
 	}
-	if err = os.Chmod(tmp.Name(), info.Mode().Perm()); err != nil {
+	if err = os.Chmod(tmp.Name(), mode); err != nil {
 		return "", fmt.Errorf("prepare: %w", err)
 	}
 	return tmp.Name(), nil
