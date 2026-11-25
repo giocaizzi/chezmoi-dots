@@ -352,3 +352,32 @@ func TestPkgBumpUnknownPin(t *testing.T) {
 		t.Errorf("printed %q before the usage error", out.String())
 	}
 }
+
+// brokenDownload answers every archive download with a server error.
+type brokenDownload struct{}
+
+func (brokenDownload) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusBadGateway, Status: "502 Bad Gateway", Body: io.NopCloser(strings.NewReader("")),
+		Header: http.Header{}, Request: r,
+	}, nil
+}
+
+func TestPkgBumpArchiveFailureWritesNothing(t *testing.T) {
+	t.Parallel()
+	text := externalsText(oldCommit, oldSum)
+	src, file := archiveSource(t, text)
+	var out bytes.Buffer
+	d, _, _ := archiveDeps(t, src, newCommit, &out)
+	d.HTTP = &http.Client{Transport: brokenDownload{}}
+	if err := cli.Run(t.Context(), d, []string{"pkg", "bump"}); err == nil {
+		t.Fatal("Run(pkg bump) with a failing download: want an error")
+	}
+	got, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(text, string(got)); diff != "" {
+		t.Errorf("externals file changed after a failed bump (-want +got):\n%s", diff)
+	}
+}

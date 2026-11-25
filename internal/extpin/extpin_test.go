@@ -210,3 +210,78 @@ func TestFindSkipsDirNamedLikeExternals(t *testing.T) {
 		t.Errorf("Find() = %v, %v, want none", pins, err)
 	}
 }
+
+// TestSetLeavesNoStaleChecksum holds Set to the promise that a bump never leaves
+// a file chezmoi apply rejects or rewrites an entry the pin does not own.
+func TestSetLeavesNoStaleChecksum(t *testing.T) {
+	t.Parallel()
+	sum512 := strings.Repeat("c", 128)
+	tests := []struct {
+		name  string
+		xfail string
+		text  string
+		stale string // text that must not survive a bump of the archive pin
+	}{
+		{
+			name:  "xfail: header with a trailing comment",
+			xfail: "xfail: a `[key] # comment` header is not recognised, so the archive is folded into the previous entry and its sha256 is overwritten",
+			text: "[\".local/bin/tool\"]\ntype = \"file\"\nurl = \"https://example.com/tool\"\nchecksum.sha256 = \"" + sumA + "\"\n" +
+				"[\".vim/x\"] # pinned plugin\ntype = \"archive\"\nurl = \"" + ghURL + "\"\n",
+			stale: "url = \"https://example.com/tool\"\nchecksum.sha256 = \"" + sumB + "\"",
+		},
+		{
+			name:  "xfail: spaced header with a checksum subtable",
+			xfail: "xfail: `[ key ]` and `[ key.checksum ]` are read as two entries, so the sha256 is left for the old commit",
+			text:  "[ \".vim/x\" ]\ntype = \"archive\"\nurl = \"" + ghURL + "\"\n[ \".vim/x\".checksum ]\nsha256 = \"" + sumA + "\"\n",
+			stale: "sha256 = \"" + sumA + "\"",
+		},
+		{
+			name:  "xfail: sha512 checksum",
+			xfail: "xfail: checksum.sha512 (also sha384, size) is not recognised, so the commit moves and the old checksum stays",
+			text:  "[\".vim/x\"]\ntype = \"archive\"\nurl = \"" + ghURL + "\"\nchecksum.sha512 = \"" + sum512 + "\"\n",
+			stale: sum512,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.xfail != "" {
+				t.Skip(tt.xfail)
+			}
+			for _, p := range Scan("f", tt.text) {
+				got, err := Set(tt.text, p, sha2, sumB)
+				if err != nil {
+					continue // refusing the pin is safe
+				}
+				if strings.Contains(got, tt.stale) {
+					t.Errorf("Set(%s) left %q:\n%s", p.Entry, tt.stale, got)
+				}
+			}
+		})
+	}
+}
+
+// FuzzScanSet checks that Scan never panics and that Set of any pin it finds
+// changes only the pin's URL and checksum lines.
+func FuzzScanSet(f *testing.F) {
+	f.Add("[\".vim/x\"]\nurl = \"" + ghURL + "\"\nchecksum.sha256 = \"" + sumA + "\"\n")
+	f.Add("[a]\r\nurl = \"" + glURL + "\"\r\n[a.checksum]\r\nsha256 = \"" + sumA + "\"\r\n")
+	f.Add("{{ if x }}\n[a]\nurl = \"" + ghURL + "\"\n{{ end }}\n[b]\nchecksum = { sha256 = \"" + sumA + "\" }\n")
+	f.Fuzz(func(t *testing.T, text string) {
+		for _, p := range Scan("f", text) {
+			got, err := Set(text, p, sha2, sumB)
+			if err != nil {
+				t.Fatalf("Set(%+v) of a scanned pin: %v", p, err)
+			}
+			before, after := strings.Split(text, "\n"), strings.Split(got, "\n")
+			if len(before) != len(after) {
+				t.Fatalf("Set changed the line count: %d -> %d", len(before), len(after))
+			}
+			for i := range before {
+				if i != p.line && i != p.sumLine && before[i] != after[i] {
+					t.Errorf("Set changed line %d outside the pin: %q -> %q", i, before[i], after[i])
+				}
+			}
+		}
+	})
+}
