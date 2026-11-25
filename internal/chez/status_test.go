@@ -21,7 +21,6 @@ func TestParseStatus(t *testing.T) {
 		{"leading space column", " A .config/example/config.toml", []chez.StatusEntry{{Last: ' ', Apply: 'A', Path: ".config/example/config.toml"}}},
 		{"script and delete", "DD old\n R run_once.sh\r\n", []chez.StatusEntry{{Last: 'D', Apply: 'D', Path: "old"}, {Last: ' ', Apply: 'R', Path: "run_once.sh"}}},
 		{"path with spaces", " M my file.txt", []chez.StatusEntry{{Last: ' ', Apply: 'M', Path: "my file.txt"}}},
-		{"trimmed first column", "A .note\nMM .zshrc", []chez.StatusEntry{{Last: ' ', Apply: 'A', Path: ".note"}, {Last: 'M', Apply: 'M', Path: ".zshrc"}}},
 		{"unreadable skipped", "garbage\nXX nope\nM\n MM\n M ok", []chez.StatusEntry{{Last: ' ', Apply: 'M', Path: "ok"}}},
 	}
 	for _, tt := range tests {

@@ -215,7 +215,8 @@ func (c *Client) WorkingTree(ctx context.Context) (string, error) {
 // Status returns chezmoi status for targets (empty when they are up to date).
 func (c *Client) Status(ctx context.Context, targets ...string) (string, error) {
 	out, err := c.output(ctx, nil, nil, append([]string{"status"}, targets...)...)
-	return strings.TrimSpace(string(out)), err
+	// Trim only the end: a line's first column may be a space.
+	return strings.TrimRight(string(out), "\r\n"), err
 }
 
 // Diff writes chezmoi diff for targets to w.

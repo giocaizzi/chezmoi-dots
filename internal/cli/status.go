@@ -37,7 +37,7 @@ func (d Deps) status(ctx context.Context, args []string) error {
 	wg.Go(func() {
 		tree = survey.Survey{
 			Runner: d.Runner, Stat: os.Stat, LookPath: d.LookPath, Home: d.Home, GOOS: d.GOOS,
-			WorkingTree: wt, Fetch: boolValue(fs, "fetch"),
+			WorkingTree: wt, Fetch: boolValue(fs, "fetch"), Getenv: d.Getenv,
 		}.Tree(ctx)
 	})
 	wg.Go(func() { out, statErr = cz.Status(ctx) })

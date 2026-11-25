@@ -35,9 +35,6 @@ func parseStatusLine(line string) (StatusEntry, bool) {
 	switch {
 	case len(line) >= 4 && line[2] == ' ' && statusColumn(line[0]) && statusColumn(line[1]) && strings.TrimSpace(line[3:]) != "":
 		return StatusEntry{Last: line[0], Apply: line[1], Path: line[3:]}, true
-	case len(line) >= 3 && line[1] == ' ' && line[0] != ' ' && statusColumn(line[0]) && strings.TrimSpace(line[2:]) != "":
-		// Client.Status trims the output, which strips the blank first column of the first line.
-		return StatusEntry{Last: ' ', Apply: line[0], Path: line[2:]}, true
 	}
 	return StatusEntry{}, false
 }

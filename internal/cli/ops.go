@@ -128,6 +128,7 @@ func (d Deps) pkgStatus(ctx context.Context, args []string) error {
 	rep := survey.Survey{
 		Runner: d.Runner, Latest: d.finder().Latest, Stat: os.Stat, LookPath: d.LookPath,
 		Home: d.Home, GOOS: d.GOOS, WorkingTree: wt, Offline: boolValue(fs, "offline"), Fetch: boolValue(fs, "fetch"),
+		Getenv: d.Getenv,
 	}.Run(ctx, sel)
 	if ctx.Err() != nil {
 		return fmt.Errorf("pkg status: %w", ctx.Err())
