@@ -1,4 +1,4 @@
-// Package inventory is the overview `chezmoi dots outdated` prints: every tool the
+// Package inventory is the overview `chezmoi dots pkg status` prints: every tool the
 // package registry gives this machine, grouped by where it comes from, with its
 // installed, pinned and latest version and the state they add up to. It is pure:
 // the survey package fills it, the term package prints it.

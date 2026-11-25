@@ -86,12 +86,12 @@ func TestHints(t *testing.T) {
 		{"unknown tree", inventory.Report{Tree: inventory.Tree{Behind: 2, Upstream: "origin/main"}}, nil},
 		{"tree", inventory.Report{Tree: inventory.Tree{Known: true, Upstream: "origin/main", Behind: 3, Ahead: 1}}, []inventory.Hint{
 			{"chezmoi dots upgrade dotfiles", "pull 3 commits from origin/main, then re-run"},
-			{"chezmoi dots outdated --fetch", "origin/main was never fetched here"},
+			{"chezmoi dots pkg status --fetch", "origin/main was never fetched here"},
 			{"git push", "1 local commit not on origin/main"},
 		}},
 		{"no upstream", inventory.Report{Tree: inventory.Tree{Known: true}}, nil},
 		{"all", inventory.Report{Groups: []inventory.Group{rel, brew, npm, script}, Tree: inventory.Tree{Known: true, Upstream: "origin/main", Fetched: fetched}}, []inventory.Hint{
-			{"chezmoi dots bump alpha zeta", "pin the newer releases"},
+			{"chezmoi dots pkg bump alpha zeta", "pin the newer releases"},
 			{"chezmoi apply", "install the pinned drift, gone"},
 			{"chezmoi dots upgrade brew", "upgrade 2 brew packages"},
 			{"chezmoi dots upgrade npm", "upgrade 1 npm package"},

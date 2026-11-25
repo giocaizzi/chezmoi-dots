@@ -56,7 +56,7 @@ func (r Report) treeHints() []Hint {
 		hs = append(hs, Hint{"chezmoi dots upgrade dotfiles", "pull " + Count(t.Behind, "commit") + " from " + t.Upstream + ", then re-run"})
 	}
 	if t.Known && t.Upstream != "" && t.Fetched.IsZero() {
-		hs = append(hs, Hint{"chezmoi dots outdated --fetch", t.Upstream + " was never fetched here"})
+		hs = append(hs, Hint{"chezmoi dots pkg status --fetch", t.Upstream + " was never fetched here"})
 	}
 	if t.Ahead > 0 {
 		hs = append(hs, Hint{"git push", Count(t.Ahead, "local commit") + " not on " + t.Upstream})
@@ -68,7 +68,7 @@ func (r Report) toolHints() []Hint {
 	var hs []Hint
 	add := func(cmd, why string) { hs = append(hs, Hint{cmd, why}) }
 	if n := r.names(Release, Outdated); len(n) > 0 {
-		add("chezmoi dots bump "+strings.Join(n, " "), "pin the newer "+plural(len(n), "release"))
+		add("chezmoi dots pkg bump "+strings.Join(n, " "), "pin the newer "+plural(len(n), "release"))
 	}
 	if n := r.names(Release, Drifted, Missing); len(n) > 0 {
 		add("chezmoi apply", "install the pinned "+strings.Join(n, ", "))
