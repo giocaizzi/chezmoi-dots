@@ -83,7 +83,11 @@ func (d Deps) service(ctx context.Context, style term.Style) (*edit.Service, err
 		CZ:       cz,
 		Registry: reg,
 		Matrix: func(ctx context.Context, scratch string) ([]matrix.Entry, error) {
-			return matrix.Build(ctx, cz, src, scratch)
+			spec, err := matrix.Load(ctx, cz)
+			if err != nil {
+				return nil, err
+			}
+			return matrix.Build(ctx, cz, src, scratch, spec)
 		},
 		Tree:   tree.New(os.DirFS(src)),
 		Editor: edit.ExecEditor{Runner: d.Runner, Getenv: d.Getenv, Stdin: d.Stdin, Stdout: d.Stderr, Stderr: d.Stderr},

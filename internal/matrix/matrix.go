@@ -316,6 +316,11 @@ func Load(ctx context.Context, cz *chez.Client) (Spec, error) {
 	if err != nil {
 		return Spec{}, err
 	}
+	return SpecFrom(data)
+}
+
+// SpecFrom parses the matrix declaration of data, failing when it is invalid.
+func SpecFrom(data map[string]any) (Spec, error) {
 	spec, fs := ParseSpec(data)
 	if len(fs) > 0 {
 		return Spec{}, fmt.Errorf("the matrix declaration is invalid (chezmoi dots lint matrix):\n%s", finding.Lines(fs))
@@ -360,14 +365,10 @@ func quoteAll(v []string) string {
 // configuration of every OS and role with its overrides. cz must target the source
 // dir src; scratch is a temp dir. Every role carries the same keys: one the role's
 // render leaves out is off (the zero value), never inherited from this machine.
-func Build(ctx context.Context, cz *chez.Client, src, scratch string) ([]Entry, error) {
+func Build(ctx context.Context, cz *chez.Client, src, scratch string, spec Spec) ([]Entry, error) {
 	tmpl, err := os.ReadFile(filepath.Join(src, ".chezmoi.toml.tmpl")) //nolint:gosec // src is the user's own dotfiles source dir
 	if err != nil {
 		return nil, fmt.Errorf("read config template: %w", err)
-	}
-	spec, err := Load(ctx, cz)
-	if err != nil {
-		return nil, err
 	}
 	data := map[string]map[string]any{}
 	for _, role := range Roles() {

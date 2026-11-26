@@ -136,11 +136,15 @@ func (l Linter) matrix(ctx context.Context) ([]finding.Finding, error) {
 // the linter of their language over the result; a template that renders empty does
 // not apply to that configuration and is skipped, like chezmoi skips it.
 func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
-	entries, err := matrix.Build(ctx, l.Real, l.Src, l.Scratch)
+	data, err := l.Iso.Data(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	spec, err := matrix.Load(ctx, l.Iso)
+	spec, err := matrix.SpecFrom(data)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := matrix.Build(ctx, l.Real, l.Src, l.Scratch, spec)
 	if err != nil {
 		return nil, err
 	}
