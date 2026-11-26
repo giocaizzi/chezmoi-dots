@@ -18,7 +18,6 @@ import (
 	"os"
 	"path"
 	"strings"
-	"sync"
 )
 
 // MaxEntries is the most entries List reads before it gives up.
@@ -105,7 +104,8 @@ type File struct {
 // List returns the regular files of the archive of the given kind read from r, in
 // archive order. Directories, symlinks and other special entries are skipped. A zip
 // is spooled to a temporary file, which is removed before List returns; it is never
-// extracted, and only one zip is spooled at a time across callers. For a tar, r is
+// extracted. Each call spools its own file, so a caller that lists several zips bounds
+// their concurrency itself (disk use is up to MaxZipSpool per call). For a tar, r is
 // read up to the end of the tar stream only; for a zip too large to list, up to the
 // spool limit. After an error the rest of r is unread, so a caller that needs the
 // whole body (to checksum it) must drain r itself. Entry names are path.Clean of the
@@ -116,7 +116,8 @@ func List(kind Kind, r io.Reader) ([]File, error) {
 	return ListLimits(kind, r, DefaultLimits())
 }
 
-// ListLimits is List with explicit limits.
+// ListLimits is List with explicit limits. A zip is spooled to a temporary file of up
+// to MaxZipSpool bytes for the length of the call; callers bound how many run at once.
 func ListLimits(kind Kind, r io.Reader, l Limits) ([]File, error) {
 	switch kind {
 	case TarGz:
@@ -186,13 +187,7 @@ func listTarGz(r io.Reader, l Limits) ([]File, error) {
 
 const creatorUnix = 3
 
-// zipSpool admits one zip spool at a time, so the temp disk List uses is bounded by
-// one spool however many downloads run at once.
-var zipSpool sync.Mutex //nolint:gochecknoglobals // a process-wide lock is the point
-
 func listZip(r io.Reader, l Limits) (files []File, err error) {
-	zipSpool.Lock()
-	defer zipSpool.Unlock()
 	tmp, err := os.CreateTemp("", "dots-zip-*")
 	if err != nil {
 		return nil, fmt.Errorf("spool zip: %w", err)

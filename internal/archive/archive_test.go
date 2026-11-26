@@ -13,7 +13,6 @@ import (
 	"math"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -452,52 +451,3 @@ func TestListLimitsAtTheTop(t *testing.T) {
 type readerFunc func([]byte) (int, error)
 
 func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
-
-// gateReader serves its data in two reads and makes the second wait for release.
-type gateReader struct {
-	data    []byte
-	started chan struct{} // closed on the first Read
-	release chan struct{} // the second Read waits on it
-	reads   int
-}
-
-func (g *gateReader) Read(p []byte) (int, error) {
-	g.reads++
-	switch g.reads {
-	case 1:
-		close(g.started)
-		return copy(p, g.data[:1]), nil
-	case 2:
-		<-g.release
-		return copy(p, g.data[1:]), nil
-	}
-	return 0, io.EOF
-}
-
-func TestListSpoolsOneZipAtATime(t *testing.T) {
-	t.Parallel()
-	data := zipBytes(t, []entry{{name: "tool", mode: 0o755}}, true)
-	first := &gateReader{data: data, started: make(chan struct{}), release: make(chan struct{})}
-	second := &gateReader{data: data, started: make(chan struct{}), release: make(chan struct{})}
-	close(second.release)
-	done := make(chan error, 2)
-	go func() { _, err := archive.List(archive.Zip, first); done <- err }()
-	<-first.started
-	go func() { _, err := archive.List(archive.Zip, second); done <- err }()
-	select {
-	case <-second.started:
-		t.Fatal("a second zip started spooling while the first was still spooling")
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(first.release)
-	for range 2 {
-		if err := <-done; err != nil {
-			t.Errorf("List = %v", err)
-		}
-	}
-	select {
-	case <-second.started:
-	default:
-		t.Error("the second zip never spooled")
-	}
-}
