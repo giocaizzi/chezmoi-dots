@@ -398,7 +398,7 @@ func TestListZipCentralDirectory(t *testing.T) {
 			t.Errorf("List = %v, want %v", err, archive.ErrTooLarge)
 		}
 	})
-	t.Run("a zip64 directory size is read from the zip64 record", func(t *testing.T) {
+	t.Run("a zip64 directory size and entry count are read from the zip64 record", func(t *testing.T) {
 		t.Parallel()
 		// From 65535 entries archive/zip writes the zip64 records. Other writers also put
 		// the 0xFFFFFFFF marker in the 32-bit directory size, which alone is over the cap.
@@ -413,6 +413,13 @@ func TestListZipCentralDirectory(t *testing.T) {
 		files, err := archive.List(archive.Zip, bytes.NewReader(data))
 		if err != nil || len(files) != 1 {
 			t.Errorf("List = %d files, %v; want one file", len(files), err)
+		}
+		// The same directory declaring 65535 + 2*65536 entries: archive/zip compares the
+		// count mod 65536 only and would read it, but a declared count over the cap is refused.
+		rec := bytes.LastIndex(data, []byte("PK\x06\x06"))
+		binary.LittleEndian.PutUint64(data[rec+32:], 1<<16-1+2<<16)
+		if _, err := archive.List(archive.Zip, bytes.NewReader(data)); !errors.Is(err, archive.ErrTooManyEntries) {
+			t.Errorf("List with a declared zip64 count over the cap = %v, want %v", err, archive.ErrTooManyEntries)
 		}
 	})
 	t.Run("an understated directory size does not get past the cap", func(t *testing.T) {
@@ -432,19 +439,76 @@ func TestListZipCentralDirectory(t *testing.T) {
 	})
 }
 
-func TestListZipUnderstatedEntryCount(t *testing.T) {
+func TestListZipFindsTheEndRecordBehindALongComment(t *testing.T) {
 	t.Parallel()
-	// Raw empty-name central directory headers, and an end record that declares one of them.
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	if _, err := zw.Create("tool"); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.SetComment(strings.Repeat("c", 4<<10)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if files, err := archive.List(archive.Zip, bytes.NewReader(buf.Bytes())); err != nil || len(files) != 1 {
+		t.Errorf("List = %d files, %v; want one file", len(files), err)
+	}
+}
+
+// rawZip is prefix, then n empty-name central directory headers, then an end record
+// that declares count entries, size bytes and a directory offset of 0.
+func rawZip(prefix []byte, n int, count uint16, size uint32) []byte {
 	hdr := make([]byte, 46)
 	copy(hdr, "PK\x01\x02")
-	dir := bytes.Repeat(hdr, archive.MaxEntries+1)
 	eocd := make([]byte, 22)
 	copy(eocd, "PK\x05\x06")
-	binary.LittleEndian.PutUint16(eocd[10:], 1)
-	binary.LittleEndian.PutUint32(eocd[12:], 46)
-	data := slices.Concat(dir, eocd)
-	if _, err := archive.List(archive.Zip, bytes.NewReader(data)); !errors.Is(err, archive.ErrTooManyEntries) {
-		t.Errorf("List = %v, want %v", err, archive.ErrTooManyEntries)
+	binary.LittleEndian.PutUint16(eocd[10:], count)
+	binary.LittleEndian.PutUint32(eocd[12:], size)
+	return slices.Concat(prefix, bytes.Repeat(hdr, n), eocd)
+}
+
+func TestListZipCountsTheHeadersTheReaderReads(t *testing.T) {
+	t.Parallel()
+	const over = archive.MaxEntries + 1
+	// A header at offset 0 whose zip64 extra field is too short for its 0xFFFFFFFF
+	// compressed size: this package's walk accepts it, archive/zip's readDirectoryHeader
+	// does not.
+	short64 := make([]byte, 46, 50)
+	copy(short64, "PK\x01\x02")
+	binary.LittleEndian.PutUint32(short64[20:], math.MaxUint32)
+	binary.LittleEndian.PutUint16(short64[30:], 4)
+	short64 = append(short64, 0x01, 0x00, 0x00, 0x00) // zip64 extra field, no data
+	tests := []struct {
+		name  string
+		xfail string
+		data  []byte
+	}{
+		{name: "an understated entry count", data: rawZip(nil, over, 1, 46)},
+		// The directory starts after the prefix, where the declared size puts it
+		// (archive/zip's base offset); the count of 0 makes zip.NewReader fail when it
+		// reads them, so only the walk can report ErrTooManyEntries.
+		{name: "a directory after a self-extractor prefix", data: rawZip([]byte("SFXSTUB!"), over, 0, over*46)},
+		{
+			name: "a header only this package accepts at the declared offset",
+			xfail: "locateDirectory switches to base offset 0 when headerAt accepts the header at the declared " +
+				"offset, but headerAt skips the zip64 extra checks of archive/zip's readDirectoryHeader, so the walk " +
+				"counts from offset 0 while zip.NewReader reads the 100001 headers after the prefix " +
+				"(378 MiB allocated for 1.46M headers in a 64 MiB directory)",
+			data: rawZip(slices.Concat(short64, []byte("junk")), over, 0, over*46),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if tt.xfail != "" {
+				t.Skip("xfail: " + tt.xfail)
+			}
+			if _, err := archive.List(archive.Zip, bytes.NewReader(tt.data)); !errors.Is(err, archive.ErrTooManyEntries) {
+				t.Errorf("List = %v, want %v", err, archive.ErrTooManyEntries)
+			}
+		})
 	}
 }
 
@@ -455,6 +519,20 @@ func TestListLimitsAtTheTop(t *testing.T) {
 		l := archive.DefaultLimits()
 		l.MaxDecompressed = math.MaxInt64 // no practical cap
 		files, err := archive.ListLimits(archive.TarGz, bytes.NewReader(tarGz(t, []entry{{name: "tool", mode: 0o755}})), l)
+		if err != nil || len(files) != 1 {
+			t.Errorf("ListLimits = %v, %v; want one file", files, err)
+		}
+	})
+	t.Run("xfail: every limit at math.MaxInt64 lists a zip", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: listZip spools through io.LimitReader(r, l.MaxZipSpool+1), which overflows to a " +
+			"negative limit and spools 0 bytes, so every zip fails as malformed; the Limits doc says " +
+			"math.MaxInt64 is a cap no archive reaches")
+		l := archive.Limits{
+			MaxNameLen: math.MaxInt, MaxNameBytes: math.MaxInt64, MaxDecompressed: math.MaxInt64,
+			MaxZipSpool: math.MaxInt64, MaxCentralDir: math.MaxInt64,
+		}
+		files, err := archive.ListLimits(archive.Zip, bytes.NewReader(zipBytes(t, []entry{{name: "tool", mode: 0o755}}, true)), l)
 		if err != nil || len(files) != 1 {
 			t.Errorf("ListLimits = %v, %v; want one file", files, err)
 		}

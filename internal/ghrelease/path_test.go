@@ -240,4 +240,31 @@ func TestProposePathLeavesNoOtherTargetInThePath(t *testing.T) {
 			t.Errorf("ProposePath = %q, true; darwin/arm64 renders it to a linux directory", got)
 		}
 	})
+	t.Run("an arch outside amd64 and arm64 settles nothing either", func(t *testing.T) {
+		t.Parallel()
+		p := Proposal{Version: "1.2.3", Targets: map[string]string{
+			"linux/arm": "linux_armv7.tar.gz", "linux/amd64": "linux_amd64.tar.xz", // .tar.xz is not listed
+		}}
+		files := map[string][]archive.File{"linux/arm": exe("armv7/tool"), "linux/amd64": nil}
+		if got, ok, _ := ProposePath([]string{"tool"}, p, files); ok {
+			t.Errorf("ProposePath = %q, true; linux/amd64 renders it to an armv7 directory", got)
+		}
+	})
+	t.Run("xfail: a path every target lists is kept when a token only looks like a platform", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: platformSpecific rejects any path with an OS or arch token, even when every target " +
+			"is listed and agrees on it, so a toolchain such as arm-none-eabi-gcc or a darwin-helpers directory " +
+			"gets no proposal")
+		p := Proposal{Version: "1.2.3", Targets: map[string]string{"linux/amd64": "linux_amd64", "darwin/arm64": "darwin_arm64"}}
+		for name, want := range map[string]string{
+			"arm-none-eabi-gcc": "toolchain-{version}/bin/arm-none-eabi-gcc",
+			"tool":              "darwin-helpers/tool",
+		} {
+			raw := strings.ReplaceAll(want, "{version}", "1.2.3")
+			files := map[string][]archive.File{"linux/amd64": exe(raw), "darwin/arm64": exe(raw)}
+			if got, ok, _ := ProposePath([]string{name}, p, files); !ok || got != want {
+				t.Errorf("ProposePath = %q, %v; want %q, true: every target lists that same path", got, ok, want)
+			}
+		}
+	})
 }

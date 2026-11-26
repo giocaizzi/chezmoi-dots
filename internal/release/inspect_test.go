@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -283,8 +284,10 @@ func TestInspectZipWaitStopsOnCancel(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	// The first zip never ends; the second waits for the slot until ctx is cancelled.
-	f := Finder{HTTP: &http.Client{Transport: pacedTransport{body: zipOf(t, "tool.exe"), delay: time.Hour}}}
+	// The first zip never ends; the second waits for the slot until ctx is cancelled,
+	// and gives up there: it never sends its request.
+	rt := &requestCounter{next: pacedTransport{body: zipOf(t, "tool.exe"), delay: time.Hour}}
+	f := Finder{HTTP: &http.Client{Transport: rt}}
 	rel := pkgreg.Release{Name: "tool", Version: "1", URL: "https://example.invalid/{target}", Targets: map[string]string{
 		"windows/amd64": "amd64.zip", "windows/arm64": "arm64.zip",
 	}}
@@ -299,4 +302,18 @@ func TestInspectZipWaitStopsOnCancel(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Inspect did not return after cancel")
 	}
+	if n := rt.n.Load(); n != 1 {
+		t.Errorf("requests = %d, want 1: the zip waiting for the slot must not download after cancel", n)
+	}
+}
+
+// requestCounter counts the requests it passes on.
+type requestCounter struct {
+	next http.RoundTripper
+	n    atomic.Int32
+}
+
+func (c *requestCounter) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.n.Add(1)
+	return c.next.RoundTrip(req)
 }
