@@ -4,6 +4,7 @@ package vaultcheck
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -41,24 +42,49 @@ type Entry struct {
 	Command     string // optional override of the CLI path
 }
 
-// Validate checks the secret table of data.
-func Validate(data map[string]any) []finding.Finding {
+// declared returns the entries of data.secret: the tables that have a kind key. The
+// data key secret may hold a user's unrelated data, so anything else is ignored.
+func declared(data map[string]any) map[string]map[string]any {
+	table, _ := data["secret"].(map[string]any)
+	out := map[string]map[string]any{}
+	for n, v := range table {
+		if e, ok := v.(map[string]any); ok {
+			if _, has := e["kind"]; has {
+				out[n] = e
+			}
+		}
+	}
+	return out
+}
+
+// Ignored returns the sorted names under the data key secret that are not registry
+// entries: tables without a kind and values that are no table. A secret that is itself
+// no table is named "secret".
+func Ignored(data map[string]any) []string {
 	raw, ok := data["secret"]
 	if !ok {
 		return nil
 	}
 	table, ok := raw.(map[string]any)
 	if !ok {
-		return []finding.Finding{finding.New("secret", "must be a table of entries")}
+		return []string{"secret"}
 	}
-	var out []finding.Finding
+	entries := declared(data)
+	var out []string
 	for _, n := range sortedKeys(table) {
-		e, ok := table[n].(map[string]any)
-		if !ok {
-			out = append(out, finding.New("secret "+n, "must be a table"))
-			continue
+		if _, ok := entries[n]; !ok {
+			out = append(out, n)
 		}
-		out = append(out, validateEntry(n, e)...)
+	}
+	return out
+}
+
+// Validate checks the entries of data.secret; see declared for what is one.
+func Validate(data map[string]any) []finding.Finding {
+	entries := declared(data)
+	out := make([]finding.Finding, 0, len(entries))
+	for _, n := range slices.Sorted(maps.Keys(entries)) {
+		out = append(out, validateEntry(n, entries[n])...)
 	}
 	return out
 }
@@ -72,17 +98,11 @@ func validateEntry(n string, e map[string]any) []finding.Finding {
 		}
 	}
 	if c, ok := e["command"]; ok {
-		if !nonEmptyString(c) {
-			bad("command must be a non-empty string")
-		} else if !validCommand(c.(string)) { //nolint:forcetypeassert // nonEmptyString checked it
-			bad("command must be an absolute path, ~/..., or a bare name looked up on PATH")
+		if msg := commandProblem(c); msg != "" {
+			bad("%s", msg)
 		}
 	}
-	kind, hasKind := e["kind"]
-	if !hasKind {
-		bad("missing kind (one of %s)", strings.Join(kinds(), ", "))
-		return out
-	}
+	kind := e["kind"] // declared guarantees the key
 	if ks, _ := kind.(string); !slices.Contains(kinds(), ks) {
 		bad("unknown kind %q (one of %s)", fmt.Sprint(kind), strings.Join(kinds(), ", "))
 		return out
@@ -143,10 +163,10 @@ func Parse(data map[string]any) ([]Entry, []finding.Finding) {
 	if fs := Validate(data); len(fs) > 0 {
 		return nil, fs
 	}
-	table, _ := data["secret"].(map[string]any)
+	table := declared(data)
 	out := make([]Entry, 0, len(table))
-	for _, n := range sortedKeys(table) {
-		t, _ := table[n].(map[string]any)
+	for _, n := range slices.Sorted(maps.Keys(table)) {
+		t := table[n]
 		e := Entry{Name: n}
 		e.Kind, _ = t["kind"].(string)
 		e.Project, _ = t[keyProject].(string)
@@ -159,6 +179,18 @@ func Parse(data map[string]any) ([]Entry, []finding.Finding) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// commandProblem is what is wrong with a declared command, or empty.
+func commandProblem(v any) string {
+	s, _ := v.(string)
+	switch {
+	case s == "":
+		return "command must be a non-empty string"
+	case !validCommand(s):
+		return "command must be an absolute path, ~/..., or a bare name looked up on PATH"
+	}
+	return ""
 }
 
 // validCommand reports whether c cannot resolve against the working directory: a bare

@@ -315,7 +315,7 @@ func TestCheckAll(t *testing.T) {
 		t.Errorf("unconfigured bws must not probe; results %+v, calls %v", got, fr.calls)
 	}
 
-	got, fs = p.CheckAll(t.Context(), m{"secret": m{"a": m{}}})
+	got, fs = p.CheckAll(t.Context(), m{"secret": m{"a": m{"kind": "pass"}}})
 	if got != nil || len(fs) == 0 {
 		t.Errorf("CheckAll(invalid) = %v, %v; want findings only", got, fs)
 	}

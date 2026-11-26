@@ -31,14 +31,14 @@ func TestValidate(t *testing.T) {
 		want []string // "where: message"
 	}{
 		{"absent", m{}, nil},
-		{"not a table", m{"secret": "x"}, []string{"secret: must be a table of entries"}},
-		{"entry not a table", m{"secret": m{"a": "x"}}, []string{"secret a: must be a table"}},
+		{"not a table is ignored", m{"secret": "x"}, nil},
+		{"entry not a table is ignored", m{"secret": m{"a": "x"}}, nil},
 		{"valid bws projectFrom", m{"secret": m{"a": valid(nil)}}, nil},
 		{"valid bws project and command", m{"secret": m{"a": valid(m{"projectFrom": nil, "project": "p", "command": "~/bin/bws"})}}, nil},
 		{"valid bw and rbw", m{"secret": m{"a": m{"kind": "bw"}, "b": m{"kind": "rbw", "command": "rbw"}}}, nil},
 		{"unknown keys sorted", m{"secret": m{"a": valid(m{"zeta": 1, "alpha": 1})}}, []string{"secret a: unknown key alpha", "secret a: unknown key zeta"}},
 		{"unknown keyring key", m{"secret": m{"a": valid(m{"keyring": m{"service": "s", "user": "u", "x": 1}})}}, []string{"secret a: unknown key keyring.x"}},
-		{"missing kind", m{"secret": m{"a": m{}}}, []string{"secret a: missing kind (one of bws, bw, rbw)"}},
+		{"table without kind is ignored", m{"secret": m{"a": m{"foo": "bar"}}}, nil},
 		{"unknown kind", m{"secret": m{"a": m{"kind": "pass"}}}, []string{`secret a: unknown kind "pass" (one of bws, bw, rbw)`}},
 		{"non-string kind", m{"secret": m{"a": m{"kind": 3}}}, []string{`secret a: unknown kind "3" (one of bws, bw, rbw)`}},
 		{"empty command", m{"secret": m{"a": m{"kind": "bw", "command": ""}}}, []string{"secret a: command must be a non-empty string"}},
@@ -54,7 +54,7 @@ func TestValidate(t *testing.T) {
 			"secret a: project is only for kind bws", "secret a: projectFrom is only for kind bws", "secret a: keyring is only for kind bws",
 		}},
 		{"rbw with keyring", m{"secret": m{"a": m{"kind": "rbw", "keyring": ring("s", "u")}}}, []string{"secret a: keyring is only for kind bws"}},
-		{"entries in name order", m{"secret": m{"b": m{}, "a": m{}}}, []string{"secret a: missing kind (one of bws, bw, rbw)", "secret b: missing kind (one of bws, bw, rbw)"}},
+		{"entries in name order", m{"secret": m{"b": m{"kind": "x"}, "a": m{"kind": "y"}}}, []string{`secret a: unknown kind "y" (one of bws, bw, rbw)`, `secret b: unknown kind "x" (one of bws, bw, rbw)`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -79,8 +79,16 @@ func TestValidateCommand(t *testing.T) {
 		command string
 		bad     bool
 	}{
-		{"bin/bws", true}, {"./bws", true}, {"../tools/bws", true}, {`bin\bws`, true}, {`.\bws`, true},
-		{"bws", false}, {"~/bin/bws", false}, {"/usr/bin/bws", false}, {"C:/tools/bws.exe", false}, {`c:\tools\bws.exe`, false},
+		{"bin/bws", true},
+		{"./bws", true},
+		{"../tools/bws", true},
+		{`bin\bws`, true},
+		{`.\bws`, true},
+		{"bws", false},
+		{"~/bin/bws", false},
+		{"/usr/bin/bws", false},
+		{"C:/tools/bws.exe", false},
+		{`c:\tools\bws.exe`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.command, func(t *testing.T) {
@@ -121,9 +129,39 @@ func TestParse(t *testing.T) {
 	}
 }
 
+func TestIgnored(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		data m
+		want []string
+	}{
+		{"absent", m{}, nil},
+		{"secret not a table", m{"secret": "x"}, []string{"secret"}},
+		{"only entries", m{"secret": m{"a": m{"kind": "bw"}}}, nil},
+		{"sorted, mixed", m{"secret": m{"z": "x", "a": m{"foo": 1}, "k": m{"kind": "bw"}, "m": m{}}}, []string{"a", "m", "z"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if diff := cmp.Diff(tt.want, vaultcheck.Ignored(tt.data)); diff != "" {
+				t.Errorf("Ignored() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestParse_ignores(t *testing.T) {
+	t.Parallel()
+	got, fs := vaultcheck.Parse(m{"secret": m{"a": m{"kind": "rbw"}, "other": m{"foo": "bar"}, "s": "x"}})
+	if len(fs) != 0 || len(got) != 1 || got[0].Name != "a" {
+		t.Errorf("Parse() = %v, %v; want only entry a", got, fs)
+	}
+}
+
 func TestParse_findings(t *testing.T) {
 	t.Parallel()
-	got, fs := vaultcheck.Parse(m{"secret": m{"a": m{}}})
+	got, fs := vaultcheck.Parse(m{"secret": m{"a": m{"kind": "pass"}}})
 	if got != nil || len(fs) != 1 {
 		t.Errorf("Parse() = %v, %v; want no entries and one finding", got, fs)
 	}

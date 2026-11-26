@@ -141,7 +141,7 @@ func TestExecRunErrors(t *testing.T) {
 		{name: "not declared", data: registry("bws", nil), have: []string{"bws"}, cmdName: "other", want: vaultcheck.ErrNotDeclared, text: `secret "other"`},
 		{name: "kind bw", data: registry("bw", nil), have: []string{"bw"}, cmdName: "example-vault", want: vaultcheck.ErrNoInjection, text: "kind bw"},
 		{name: "kind rbw", data: registry("rbw", nil), have: []string{"rbw"}, cmdName: "example-vault", want: vaultcheck.ErrNoInjection, text: "kind rbw"},
-		{name: "invalid registry", data: m{"secret": m{"example-vault": m{}}}, have: []string{"bws"}, cmdName: "example-vault", text: "the secrets registry is invalid (chezmoi dots lint secrets)"},
+		{name: "invalid registry", data: m{"secret": m{"example-vault": m{"kind": "pass"}}}, have: []string{"bws"}, cmdName: "example-vault", text: "the secrets registry is invalid (chezmoi dots lint secrets)"},
 		{name: "cli missing", data: registry("bws", nil), cmdName: "example-vault", text: "bws not found: install bws or set command in .chezmoidata/secrets.toml"},
 		{name: "keyring error", data: registry("bws", nil), have: []string{"bws"}, keyring: &fakeKeyring{err: fmt.Errorf("%w: not found", vaultcheck.ErrNoToken)}, cmdName: "example-vault", text: "(service bws, user access-token): chezmoi secret keyring set --service=bws --user=access-token", keyAsk: 1},
 		{name: "keyring empty", data: registry("bws", nil), have: []string{"bws"}, keyring: &fakeKeyring{}, cmdName: "example-vault", text: "no access token in the keyring", keyAsk: 1},

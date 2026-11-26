@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/giocaizzi/chezmoi-dots/internal/audit"
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
@@ -62,6 +63,11 @@ func (d Deps) auditSecrets(ctx context.Context) error {
 		st := term.NewStyle(d.Stderr, d.Getenv)
 		fmt.Fprintf(d.Stderr, "%s✗%s secrets\n%s\n  fix the registry (chezmoi dots lint secrets)\n", st.R, st.O, joinLines(found))
 		return ErrReported
+	}
+	if ignored := vaultcheck.Ignored(data); len(ignored) > 0 {
+		defer func() {
+			fmt.Fprintf(d.Stdout, "secrets: ignored data.secret entries without a kind: %s (see docs/secrets.md)\n", strings.Join(ignored, ", "))
+		}()
 	}
 	if len(results) == 0 {
 		fmt.Fprintln(d.Stdout, "secrets: no entries declared (.chezmoidata/secrets.toml)")
