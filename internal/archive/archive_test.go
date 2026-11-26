@@ -434,6 +434,22 @@ func TestListZipCentralDirectory(t *testing.T) {
 	})
 }
 
+func TestListZipUnderstatedEntryCount(t *testing.T) {
+	t.Parallel()
+	// Raw empty-name central directory headers, and an end record that declares one of them.
+	hdr := make([]byte, 46)
+	copy(hdr, "PK\x01\x02")
+	dir := bytes.Repeat(hdr, archive.MaxEntries+1)
+	eocd := make([]byte, 22)
+	copy(eocd, "PK\x05\x06")
+	binary.LittleEndian.PutUint16(eocd[10:], 1)
+	binary.LittleEndian.PutUint32(eocd[12:], 46)
+	data := append(dir, eocd...)
+	if _, err := archive.List(archive.Zip, bytes.NewReader(data)); !errors.Is(err, archive.ErrTooManyEntries) {
+		t.Errorf("List = %v, want %v", err, archive.ErrTooManyEntries)
+	}
+}
+
 func TestListLimitsAtTheTop(t *testing.T) {
 	t.Parallel()
 	t.Run("xfail: a MaxDecompressed of math.MaxInt64 does not panic", func(t *testing.T) {
