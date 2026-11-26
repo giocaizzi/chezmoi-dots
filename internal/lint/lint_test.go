@@ -121,7 +121,6 @@ func TestTemplateFilesSkipsSecretPartials(t *testing.T) {
 		// relative to the source dir.
 		{
 			name: "a template that includeTemplates a source-relative secret file", body: "{{ includeTemplate \"private/creds.tmpl\" . }}\n",
-			xfail: "includeTemplate names are only looked up in .chezmoitemplates",
 		},
 	}
 	for _, tt := range tests {

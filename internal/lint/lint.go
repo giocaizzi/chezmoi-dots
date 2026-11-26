@@ -276,10 +276,12 @@ var (
 // partialRef matches the string-literal name of a `template` or `includeTemplate`
 // call inside an action. Calls whose name is not a literal (a variable, a printf) are
 // not followed.
-var partialRef = regexp.MustCompile("\\b(?:template|includeTemplate)\\s+(?:\"([^\"]+)\"|`([^`]+)`)")
+var partialRef = regexp.MustCompile("\\b(template|includeTemplate)\\s+(?:\"([^\"]+)\"|`([^`]+)`)")
 
 // callsSecret reports whether a template calls a secret or decrypt function, in its
-// own actions or in any partial under src's .chezmoitemplates it reaches, transitively.
+// own actions or in any partial it reaches, transitively: a `template` call names a
+// file under src's .chezmoitemplates; an `includeTemplate` call is looked up there
+// first and then relative to src, as chezmoi does.
 func callsSecret(src string, tmpl []byte) bool {
 	return reachesSecret(src, tmpl, map[string]bool{})
 }
@@ -293,19 +295,35 @@ func reachesSecret(src string, tmpl []byte, seen map[string]bool) bool {
 			return true
 		}
 		for _, m := range partialRef.FindAllSubmatch(body, -1) {
-			name := string(m[1]) + string(m[2])
-			if seen[name] || !filepath.IsLocal(filepath.FromSlash(name)) {
-				continue
-			}
-			seen[name] = true
-			b, err := os.ReadFile(filepath.Join(src, ".chezmoitemplates", filepath.FromSlash(name))) //nolint:gosec // name is checked local
-			if err != nil {
-				continue // a missing partial calls nothing
-			}
-			if reachesSecret(src, b, seen) {
+			if partialReachesSecret(src, string(m[1]), string(m[2])+string(m[3]), seen) {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+// partialReachesSecret resolves one partial reference and reports whether the file it
+// names reaches a secret function. The first directory holding the file wins.
+func partialReachesSecret(src, keyword, name string, seen map[string]bool) bool {
+	if !filepath.IsLocal(filepath.FromSlash(name)) {
+		return false
+	}
+	dirs := []string{".chezmoitemplates"}
+	if keyword == "includeTemplate" {
+		dirs = append(dirs, ".")
+	}
+	for _, dir := range dirs {
+		path := filepath.Join(src, dir, filepath.FromSlash(name))
+		b, err := os.ReadFile(path) //nolint:gosec // name is checked local
+		if err != nil {
+			continue // a missing partial calls nothing
+		}
+		if seen[path] {
+			return false
+		}
+		seen[path] = true
+		return reachesSecret(src, b, seen)
 	}
 	return false
 }
