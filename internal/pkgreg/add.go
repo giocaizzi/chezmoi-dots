@@ -70,7 +70,7 @@ func (e PackageEntry) Text() string {
 // ReleaseEntry is a new [release.<name>] table with its target and sha256 tables.
 type ReleaseEntry struct {
 	Name, Version, URL string
-	Type, Path         string            // optional: "file" or "archive-file", and the binary inside the archive
+	Type, Path         string            // optional: "file" or "archive-file", and the binary inside the archive (may hold {version} and {target})
 	Exe                bool              // a windows target is mapped
 	Targets            map[string]string // "<os>/<arch>" to the release's name for it
 	Sums               map[string]string // "<os>/<arch>" to the sha256; nil leaves the table out

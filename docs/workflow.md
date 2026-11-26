@@ -26,7 +26,7 @@
    chezmoi dots upgrade
    ```
 
-4. Keep pins current: release pins in `.chezmoidata/packages.toml` and commit-pinned archive externals in `.chezmoiexternal` files. Survey, bump, review, publish, then apply on each machine.
+4. Keep pins current: release pins in `.chezmoidata/packages.toml` (schema in the [package registry](registry.md)) and commit-pinned archive externals in `.chezmoiexternal` files. Survey, bump, review, publish, then apply on each machine.
 
    ```sh
    chezmoi dots pkg status

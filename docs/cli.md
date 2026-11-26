@@ -188,7 +188,8 @@ chezmoi dots list
 chezmoi dots lint [<check>...]
 ```
 
-Checks are `registry`, `aliases`, `packages`, `matrix`, `templates`. With none,
+Checks are `registry`, `aliases`, `packages` (the rules are in the
+[package registry](registry.md)), `matrix`, `templates`. With none,
 run all in that order; explicit arguments run in the supplied order. Findings
 and check summaries go to stderr. The `matrix` check validates the matrix declaration
 (see [matrix.md](matrix.md)); `templates` renders every shell, zsh,
@@ -293,7 +294,9 @@ chezmoi dots pkg status [--offline] [--fetch] [--check]
 ```
 
 Survey tools on this machine, comparing installed versions, pins and upstream
-releases. No positional arguments. All options default to false:
+releases. The tools come from the [package registry](registry.md) through your
+dotfiles' `role`, `releases` and `packages` templates (see
+[what your dotfiles provide](registry.md#what-your-dotfiles-provide)). No positional arguments. All options default to false:
 
 - `--offline`: skip upstream release and archive HEAD lookups, `uv` and `npm` latest lookups and
   the Git fetch. For pinned npm packages (including the `npm view` lookup) the
@@ -348,7 +351,8 @@ chezmoi dots pkg status --fetch --check
 chezmoi dots pkg bump [--dry-run] [<pin>...]
 ```
 
-`<pin>` is a release name from `.chezmoidata/packages.toml` or an archive
+`<pin>` is a release name from `.chezmoidata/packages.toml` (see the
+[release table](registry.md#releases)) or an archive
 repository path (`octocat/example`); with no names, everything. Fetch newer
 upstream versions and checksums, then update the pins. It edits
 `.chezmoidata/packages.toml` and/or the externals files and never installs
@@ -470,19 +474,54 @@ rate limit; neither is required. The assets are read by name only:
 - Per os/arch archives (`.tar.gz`, `.tgz`, `.tar.xz`, `.zip`) win over bare binaries,
   `.tar.gz` wins over `.zip` on darwin and linux and `.zip` over `.tar.gz` on
   windows. Two equal candidates are reported as ambiguous and both are left out.
-- The chosen assets must be all archives (`type = "archive-file"`, with `path` the
-  repository name) or all bare binaries (`type = "file"`); a mix is an error. `exe =
-  true` is written when a windows target is mapped.
+- The chosen assets must be all archives (`type = "archive-file"`) or all bare
+  binaries (`type = "file"`); a mix is an error. `exe = true` is written when a
+  windows target is mapped.
 - The release version (the tag without a leading `v`) becomes `{version}` in the URL;
   the part of the names that differs per platform becomes `{target}` and each
   target's value.
 
+For `type = "archive-file"` the `path` is read from the archives. Before the proposal
+is printed (and so before the confirmation), every target's archive is downloaded
+once, for the checksum and, when it is a `.tar.gz`, `.tgz` or `.zip`, for the list of
+its regular files; nothing is extracted to disk (a zip is spooled to a temporary file
+that is removed). The same size cap and timeout as in release mode apply, and a
+download that fails stops the command with nothing written. A target's candidates
+are its executable files whose name is the entry name or the repository name (on
+windows `<name>.exe`, any case); a file in an archive that records no modes counts
+as executable. When every listed target has exactly one candidate and they are the
+same path once the version and the target's full value are replaced by `{version}` and
+`{target}` where they are whole tokens, that is the `path` (for example
+`tool_{version}/bin/tool`; never with `.exe`). `{target}` always stands for the whole
+registry value, archive extension included: with extension-carrying values
+(`linux_amd64.tar.gz`) a directory like `tool_1.2.3_linux_amd64` is not settled and is
+reported as not found. When some target could not be listed (a `.tar.xz`, say), a path
+that still names an OS or an arch (`linux`, `amd64`, `x86_64`, ...) once templated is
+not proposed, since it could be wrong for that target; when every target is listed
+and they all agree on the path, it is proposed as is (`toolchain-{version}/bin/arm-none-eabi-gcc`). Otherwise the `path` stays the repository name. A `.tar.xz` archive is not listed, and targets with one are left out
+of the check; an archive that cannot be read counts the same.
+
+Listing is bounded against hostile archives: entry names over 4096 bytes or more
+than 16 MiB of names in total, more than 100000 entries, or more than 4 GiB of
+decompressed `.tar.gz` data stop the listing. A `.zip` is spooled only up to 256 MiB,
+one zip at a time per run (the wait for the slot is not part of a download's timeout), and is not listed when its central
+directory holds more than 100000 entries or is over 64 MiB, counted from the headers the
+reader would actually read (not from the sizes the archive declares). An archive that hits a limit counts as unchecked; its
+checksum still covers the whole download. Zip entry names are kept as stored
+(backslashes stay backslashes), as chezmoi matches them when it applies the external.
+
 The proposal goes to stderr: `version`, `url`, `type`, `path`, `exe`, each target
-and its value, then `left out: ...` and `ambiguous: ...`. On a terminal it is
-confirmed with `Add this release? [y/N]`; without one it needs `--yes` (otherwise
-exit 2). The entry has the keys `version`, `url`, `type`, `path`, `exe`, `roles`,
-`requires`, then the target and sha256 tables; the checksums are computed as in
-release mode, so it downloads every target's archive.
+and its value, then `left out: ...` and `ambiguous: ...`. The `path` line says how it
+was settled: `(found in the archives)`, `(not found in the archives)` followed by a
+line `path candidates: <target>: <files>; ...` (what matched, or up to five
+executable files, or `none`; each file name is quoted with Go escapes, as the
+names come from the archive), or `(unchecked: <reason>)` when no archive could be
+listed. On a terminal it is confirmed with `Add this release? [y/N]`; without one it
+needs `--yes` (otherwise exit 2, and nothing is downloaded). The entry has the keys
+`version`, `url`, `type`, `path`, `exe`, `roles`, `requires`, then the target and
+sha256 tables; the checksums come from the same downloads, so the archives are not
+fetched twice. Bare binaries (`type = "file"`) have no `path` and are downloaded for
+the checksum only after the confirmation, as in release mode.
 
 `--roles` takes a comma list of the profiles declared in the `matrix` table of
 the chezmoi data (any non-empty name when none is declared) and writes
@@ -494,9 +533,10 @@ usage errors (exit 2).
 
 `--dry-run` (false) prints the entry to stdout and changes nothing; for an existing
 package it prints the key lines it would add. In release and GitHub mode it downloads
-no archive and ends the entry with the comment `# sha256 computed when written`
-where the checksums go (`--github` still reads the GitHub API). It makes no git
-changes.
+no archive, ends the entry with the comment `# sha256 computed when written`
+where the checksums go and leaves `path` as the repository name, marked
+`(unchecked: --dry-run downloads no archive)` (`--github` still reads the GitHub
+API). It makes no git changes.
 
 After the write, the whole package registry is validated as in
 `lint packages`. Findings are printed to stderr (`✗ packages`, the findings, and
