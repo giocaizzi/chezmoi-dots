@@ -139,6 +139,9 @@ func resolveCLI(e Entry, home string, lookPath func(string) (string, error)) (bi
 		return "", name, &commandError{"command " + name + " is not an absolute path"}
 	default:
 		if rest, ok := strings.CutPrefix(name, "~/"); ok {
+			if home == "" {
+				return "", name, &commandError{"cannot expand ~/ in command: home directory unknown"}
+			}
 			name = filepath.Join(home, rest)
 		}
 	}

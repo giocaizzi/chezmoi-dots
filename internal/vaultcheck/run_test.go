@@ -231,9 +231,8 @@ func TestExecRunHomeCommand(t *testing.T) {
 
 func TestExecRunXFail(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: ~/ with no home dir resolves against the cwd", func(t *testing.T) {
+	t.Run("~/ with no home dir is refused", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: pending fix: an empty Home turns ~/bin/bws into the relative bin/bws")
 		r := newRig()
 		r.exec.Home = "" // os.UserHomeDir failed, as with HOME unset
 		var looked []string

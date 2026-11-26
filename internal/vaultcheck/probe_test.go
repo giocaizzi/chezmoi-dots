@@ -89,6 +89,7 @@ func TestCheck(t *testing.T) {
 		keyring *fakeKeyring
 		reply   script
 		timeout time.Duration
+		noHome  bool
 		want    vaultcheck.Result
 		argv    []string // the one CLI call expected; nil means none
 	}{
@@ -171,6 +172,13 @@ func TestCheck(t *testing.T) {
 			},
 		},
 		{
+			name: "home unknown", entry: vaultcheck.Entry{Name: "x", Kind: "rbw", Command: "~/bin/rbw"}, noHome: true, have: []string{"bin/rbw"},
+			want: vaultcheck.Result{
+				Name: "x", Kind: "rbw", State: vaultcheck.Fail, Detail: "cannot expand ~/ in command: home directory unknown",
+				Hint: "set command in .chezmoidata/secrets.toml to an absolute path, ~/..., or a bare name",
+			},
+		},
+		{
 			name: "bw unlocked", entry: vaultcheck.Entry{Name: "pw", Kind: "bw"}, have: []string{"bw"},
 			reply: script{stdout: `{"userEmail":"octocat@example.com","status":"unlocked"}`},
 			want:  vaultcheck.Result{Name: "pw", Kind: "bw", State: vaultcheck.OK, Detail: "vault unlocked"},
@@ -236,6 +244,9 @@ func TestCheck(t *testing.T) {
 				kr = &fakeKeyring{}
 			}
 			p := vaultcheck.Prober{Runner: fr, LookPath: lookPath(tt.have...), Keyring: kr, Home: "/home/octocat", Timeout: tt.timeout}
+			if tt.noHome {
+				p.Home = ""
+			}
 			got := p.Check(t.Context(), tt.entry, tt.data)
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("Check() mismatch (-want +got):\n%s", diff)
