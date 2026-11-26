@@ -35,7 +35,9 @@ the profile's answers (profile overrides seed). Only `.chezmoi.os` (and a
 variant's `set`) is passed on top. Nothing from this machine's config `[data]`
 reaches a configuration, and `.chezmoidata` values apply exactly as after
 `chezmoi init` with those answers. Without a config template, a configuration's
-config data is just the declared answers.
+config data is just the declared answers. The rendered config replaces this
+machine's config for that configuration, so settings such as `destDir` come
+only from the template (chezmoi's defaults when it sets none).
 
 Only `.chezmoi.os` is overridden. `.chezmoi.arch`, `homeDir`, `hostname`,
 `osRelease`, `kernel`, path separators and the rest stay this host's (a windows
