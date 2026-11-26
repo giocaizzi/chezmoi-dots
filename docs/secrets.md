@@ -15,7 +15,7 @@ Each entry is a table under `secret` (chezmoi data key `secret`), named freely:
 | `project` | `bws` | Literal Bitwarden Secrets Manager project id. Exactly one of `project` / `projectFrom` |
 | `projectFrom` | `bws` | Name of a `[data]` answer that holds the project id. Exactly one of `project` / `projectFrom` |
 | `keyring` | `bws`, required | Inline table `{ service, user }`: where the access token lives in the OS keyring |
-| `command` | all, optional | Path of the CLI to use instead of the default (`bws`, `bw`, `rbw`); a leading `~/` expands to the home directory |
+| `command` | all, optional | CLI to use instead of the default (`bws`, `bw`, `rbw`): an absolute path (including a Windows `C:\...` path), `~/...` (expands to the home directory), or a bare name looked up on `PATH`. A relative path with a separator is refused |
 
 Keys are camelCase, like the other registries.
 
@@ -52,6 +52,8 @@ like `packages`. Findings are reported as `secret <name>: <message>`:
 - Unknown key: `unknown key <k>`; inside `keyring`: `unknown key keyring.<k>`.
 - `kind` missing: `missing kind (one of bws, bw, rbw)`; other value: `unknown kind "<v>" (one of bws, bw, rbw)`.
 - `command` present but not a non-empty string: `command must be a non-empty string`.
+- `command` a relative path with a separator (`./bws`, `bin/bws`): `command must be an absolute path, ~/..., or a bare name looked up on PATH`. It would resolve against the current directory of whoever runs chezmoi, so `secrets run` and the audit also refuse it (`command <c> is not an absolute path`).
+- `command` starting with `~/` when the home directory is unknown: refused at run/audit time with `cannot expand ~/ in command: home directory unknown`.
 - `bws`: neither `project` nor `projectFrom`: `kind bws needs project or projectFrom`; both: `set project or projectFrom, not both`; either not a non-empty string: `project must be a non-empty string` / `projectFrom must be a non-empty string`.
 - `bws` keyring: missing: `kind bws needs keyring = { service, user }`; not a table: `keyring must be a table`; `service` or `user` missing or empty: `keyring needs service` / `keyring needs user`.
 - `bw` / `rbw` with `project`, `projectFrom` or `keyring`: `<key> is only for kind bws`.
@@ -123,8 +125,8 @@ It works for `bws` entries only: `bw` and `rbw` have no token to inject, so
   including `--`, `--output` and `--color`, so
   `chezmoi dots secrets run example-vault -- secret list <project-id> --output json --color no`
   reaches `bws` unchanged.
-- The CLI is resolved like the audit does: the entry's `command` (a leading `~/`
-  expands to the home directory) or `bws` on `PATH`. The token is read from the
+- The CLI is resolved like the audit does: the entry's `command` (absolute path, `~/...`
+  expanded to the home directory, or a bare name looked up on `PATH`) or `bws` on `PATH`. The token is read from the
   entry's keyring (`chezmoi secret keyring get`) and set as `BWS_ACCESS_TOKEN` in
   the child's environment only.
 - `--timeout <duration>` is a Go duration (`30s`, `2m`); the default `0` means no
