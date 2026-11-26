@@ -158,6 +158,27 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A template is rendered only where chezmoi manages it: .chezmoiignore, rendered
+	// with the configuration's data, keeps gated templates (secrets, network) out.
+	managed := make([]map[string]bool, len(entries))
+	var mg errgroup.Group
+	mg.SetLimit(4)
+	for i, e := range entries {
+		mg.Go(func() error {
+			m, err := l.Iso.Managed(ctx, e.Overrides)
+			if err != nil {
+				return fmt.Errorf("list managed files for %s: %w", e.Label(), err)
+			}
+			managed[i] = map[string]bool{}
+			for _, src := range m {
+				managed[i][src] = true
+			}
+			return nil
+		})
+	}
+	if err := mg.Wait(); err != nil {
+		return nil, err
+	}
 	var (
 		out []finding.Finding
 		mu  sync.Mutex
@@ -170,6 +191,9 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 			return nil, fmt.Errorf("read %s: %w", f, err)
 		}
 		for i, e := range entries {
+			if !managed[i][f] {
+				continue
+			}
 			g.Go(func() error {
 				fs := l.renderAndLint(ctx, f, tmpl, e, i)
 				mu.Lock()
@@ -283,7 +307,7 @@ var (
 	// secretFunc matches a call to a chezmoi password-manager, secret or decrypt
 	// function; field accesses (.pass) and variables ($pass) do not match.
 	secretFunc = regexp.MustCompile(`(?:^|[^\w.$])(?:` +
-		`(?:bitwarden|onepassword|keepassxc|lastpass|gopass|keeper|awsSecretsManager|dashlane|doppler|hcpVaultSecret|ejson|protonPass|rbw)\w*` +
+		`(?:bitwarden|onepassword|keepassxc|lastpass|gopass|keeper|awsSecretsManager|dashlane|doppler|ejson|protonPass|rbw)\w*` +
 		`|pass|passFields|passRaw|passhole|vault|secret|secretJSON|azureKeyVault|keyring|decrypt)\b`)
 )
 

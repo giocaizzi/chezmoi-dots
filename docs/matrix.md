@@ -99,7 +99,8 @@ mechanism.
 `lint templates` renders every template whose target is a shell (`.sh`, `.bash`),
 zsh, PowerShell (`.ps1`, windows configurations only) or JSON file, once per
 configuration and variant, labelled `<os>/<profile>` or `<os>/<profile> [name]`.
-It skips partials (`.chezmoitemplates`), chezmoi's own special files,
+A template is rendered only in the configurations where chezmoi manages it, so
+`.chezmoiignore`, rendered with that configuration's data, applies. It skips partials (`.chezmoitemplates`), chezmoi's own special files,
 encrypted, symlink and modify entries, and any template whose actions call a
 password-manager, secret or decrypt function. Linters: shellcheck (bash dialect
 when there is no shebang), `zsh -n`, the PowerShell parser and JSON validity; a

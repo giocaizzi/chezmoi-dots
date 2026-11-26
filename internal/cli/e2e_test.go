@@ -338,7 +338,7 @@ func TestLintTemplatesSeedsProfileAnswers(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
-	e.writeFile(t, ".chezmoiscripts/probe.json.tmpl", "{{ if .featureX }}{ broken{{ end }}")
+	e.writeFile(t, "dot_probe.json.tmpl", "{{ if .featureX }}{ broken{{ end }}")
 	_, stderr, err := e.run(t, "", "lint", "templates")
 	if err == nil || !strings.Contains(stderr, "(darwin/home)") || strings.Contains(stderr, "/minimal)") {
 		t.Errorf("lint templates = %v, stderr %q, want findings for the home profile only", err, stderr)
@@ -350,7 +350,7 @@ func TestLintTemplatesSeedsProfileAnswers(t *testing.T) {
 func TestLintTemplatesRendersConfigPerOS(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	e.writeFile(t, ".chezmoiscripts/probe.json.tmpl", "{{ if get . \"winOnly\" }}{ broken{{ end }}")
+	e.writeFile(t, "dot_probe.json.tmpl", "{{ if get . \"winOnly\" }}{ broken{{ end }}")
 	_, stderr, err := e.run(t, "", "lint", "templates")
 	if err == nil || !strings.Contains(stderr, "(windows/default)") || strings.Contains(stderr, "(darwin/") || strings.Contains(stderr, "(linux/") {
 		t.Errorf("lint templates = %v, stderr %q, want findings for the windows configuration only", err, stderr)
@@ -361,10 +361,24 @@ func TestLintTemplatesVariant(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
 	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration+"[[matrix.variant]]\nname = \"one tool\"\nprofiles = [\"home\"]\nset = { tools = [\"alpha\"] }\n")
-	e.writeFile(t, ".chezmoiscripts/probe.json.tmpl", `{{ if has "alpha" (get . "tools" | default list) }}{ broken{{ end }}`)
+	e.writeFile(t, "dot_probe.json.tmpl", `{{ if has "alpha" (get . "tools" | default list) }}{ broken{{ end }}`)
 	_, stderr, err := e.run(t, "", "lint", "templates")
 	if err == nil || !strings.Contains(stderr, "(darwin/home [one tool])") || strings.Contains(stderr, "/minimal") || strings.Contains(stderr, "(darwin/home)") {
 		t.Errorf("lint templates = %v, stderr %q, want findings for the home variant only", err, stderr)
+	}
+}
+
+// A template .chezmoiignore leaves out of a configuration is not rendered there, so
+// an answer declared empty keeps gated templates (secrets, network) out of the lint.
+func TestLintTemplatesHonoursChezmoiignore(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	e.writeFile(t, ".chezmoiignore", "{{ if not .featureX }}.probe.json\n{{ end }}")
+	e.writeFile(t, "dot_probe.json.tmpl", "{ broken")
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "dot_probe.json.tmpl (darwin/home)") || strings.Contains(stderr, "/minimal)") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the home profile only", err, stderr)
 	}
 }
 
