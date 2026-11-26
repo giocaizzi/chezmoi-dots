@@ -102,7 +102,7 @@ func (d Deps) auditAliases(ctx context.Context) error {
 	}
 	shells := []struct{ name, script string }{
 		{"zsh", "print -l ${(k)aliases}"},
-		{"bash", "compgen -a"},
+		{"bash", "compgen -a || true"},
 	}
 	failed := false
 	for _, sh := range shells {
