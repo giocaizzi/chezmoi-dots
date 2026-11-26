@@ -197,8 +197,7 @@ PowerShell and JSON template for every configuration and lints the result with
 the available linters (details in [matrix.md](matrix.md#template-linting)).
 
 Options: only `-h`, `--help`. Environment: shared chezmoi/output settings and
-`PATH` for external validators. Alias validation can use the age identity
-configured in chezmoi when available.
+`PATH` for external validators.
 
 ```sh
 chezmoi dots lint
@@ -523,9 +522,8 @@ sha256 tables; the checksums come from the same downloads, so the archives are n
 fetched twice. Bare binaries (`type = "file"`) have no `path` and are downloaded for
 the checksum only after the confirmation, as in release mode.
 
-`--roles` takes a comma list of the profiles declared in the `matrix` table of
-the chezmoi data (any non-empty name when none is declared) and writes
-`roles = [...]`; `--requires <answer>` writes `requires = "<answer>"`. Both work
+`--roles` takes a comma list of non-empty role names, free-form names your
+templates define, and writes `roles = [...]`; `--requires <answer>` writes `requires = "<answer>"`. Both work
 in every mode. Package source flags with `--release`, release flags
 (`--version`, `--url`, `--target`) without it, a missing version, url or target in
 release mode, a bad name, role, target or url, and a name other than exactly one are
@@ -555,7 +553,7 @@ Environment: shared chezmoi and output settings; `GH_TOKEN` / `GITHUB_TOKEN` for
 chezmoi dots pkg add wget --brew --apt
 chezmoi dots pkg add wget            # ask this machine's package managers
 chezmoi dots pkg add wget --yes      # accept what they find, no prompt
-chezmoi dots pkg add example-app --cask example-app --roles personal,work
+chezmoi dots pkg add example-app --cask example-app --roles home
 chezmoi dots pkg add example-tool --release --version 1.2.3 \
   --url 'https://example.com/{version}/tool-{target}.tar.gz' \
   --target linux/amd64=linux-x86_64 --target darwin/arm64=macos-arm --dry-run

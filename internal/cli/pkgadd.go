@@ -18,7 +18,6 @@ import (
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
 	"github.com/giocaizzi/chezmoi-dots/internal/detect"
 	"github.com/giocaizzi/chezmoi-dots/internal/ghrelease"
-	"github.com/giocaizzi/chezmoi-dots/internal/matrix"
 	"github.com/giocaizzi/chezmoi-dots/internal/pkgreg"
 	"github.com/giocaizzi/chezmoi-dots/internal/registry"
 )
@@ -33,26 +32,6 @@ type pkgAddSpec struct {
 	detect bool   // no package-source flag: ask the managers on this machine
 	yes    bool
 	dry    bool
-}
-
-// roles returns the --roles the entry is limited to.
-func (s pkgAddSpec) roles() []string {
-	if s.rel != nil {
-		return s.rel.Roles
-	}
-	return s.pkg.Roles
-}
-
-// checkRoles rejects a role the matrix table does not declare; with no declared
-// profile any name passes.
-func checkRoles(data map[string]any, roles []string) error {
-	declared := matrix.DeclaredProfiles(data)
-	for _, r := range roles {
-		if !pkgreg.ValidRole(declared, r) {
-			return pkgAddUsage("--roles takes a comma list of the declared profiles (%s), not %q", strings.Join(declared, ", "), r)
-		}
-	}
-	return nil
 }
 
 func (s pkgAddSpec) kind() string {
@@ -93,9 +72,6 @@ func (d Deps) pkgAdd(ctx context.Context, args []string) error {
 	data, err := cz.Data(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("read the chezmoi data: %w", err)
-	}
-	if err := checkRoles(data, spec.roles()); err != nil {
-		return err
 	}
 	kind, taken := pkgreg.Kind(data, spec.name)
 	if taken && (kind == kindRelease || spec.kind() == kindRelease) {

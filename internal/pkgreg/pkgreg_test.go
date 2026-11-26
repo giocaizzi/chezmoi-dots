@@ -208,27 +208,21 @@ func TestSetReleaseLeavesVersionCmd(t *testing.T) {
 	}
 }
 
-func TestValidateRolesAgainstDeclaredProfiles(t *testing.T) {
+func TestValidateRoles(t *testing.T) {
 	t.Parallel()
-	declaration := map[string]any{"profile": map[string]any{"home": map[string]any{}, "minimal": map[string]any{}}}
 	tests := []struct {
 		name     string
-		matrix   map[string]any
-		roles    []any
+		roles    any
 		wantText string // substring of the findings; empty means valid
 	}{
-		{"declared", declaration, []any{"home", "minimal"}, ""},
-		{"undeclared", declaration, []any{"home", "work"}, "roles must be a subset of the declared profiles [home minimal]"},
-		{"no declaration accepts any name", nil, []any{"anything"}, ""},
-		{"no declaration rejects empty", nil, []any{""}, "roles must be a list of non-empty names"},
+		{"any name", []any{"anything"}, ""},
+		{"empty name", []any{""}, "roles must be a list of non-empty names"},
+		{"not a list", "home", "roles must be a list of non-empty names"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			data := map[string]any{"package": map[string]any{"x": map[string]any{"brew": "x", "roles": tt.roles}}}
-			if tt.matrix != nil {
-				data["matrix"] = tt.matrix
-			}
 			got := finding.Lines(Validate(data))
 			switch {
 			case tt.wantText == "" && got != "":

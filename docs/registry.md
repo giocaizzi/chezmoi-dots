@@ -29,7 +29,7 @@ roles = ["personal", "work"]
 | `agents` | any | Counts as an install method; what it means is up to your templates | `lint` only |
 | `fontFile` | any | Required by `ompFont`; what it means is up to your templates | `lint` only |
 | `scope` | string | `"machine"` | `lint` only |
-| `roles` | list of strings | Profiles the package is for: names declared in the [matrix declaration](matrix.md) (any non-empty name without one) | `lint` checks it; your templates apply it; `pkg add --roles` writes it |
+| `roles` | list of strings | Role names the package is for: free-form non-empty names that your templates define (the [matrix](matrix.md) profile names are not involved) | `lint` checks it; your templates apply it; `pkg add --roles` writes it |
 | `requires` | string | Name of a `[data]` answer that must be true | `lint` checks it; your templates apply it; `pkg add --requires` writes it |
 | `cmd` | string | The command the package provides (default: the package name) | `pkg status` |
 | `versionCmd` | list of strings | argv that prints the installed version (default: `[<cmd>, "--version"]`) | `pkg status` |
@@ -41,7 +41,7 @@ roles = ["personal", "work"]
 - `script must list operating systems`: `script` is not a list of `darwin`, `linux`, `windows`.
 - `scope must be "machine"`.
 - `ompFont needs fontFile`.
-- `roles must be a list of non-empty names`, and with a matrix declaration `roles must be a subset of the declared profiles [...]`.
+- `roles must be a list of non-empty names`.
 - `requires must name a [data] answer`: not a non-empty string. It does not check that the answer exists.
 - `versionCmd must be a non-empty argv list`: a list of non-empty strings.
 
@@ -106,7 +106,7 @@ Any other URL still validates and pins, but its latest version is reported as un
 
 | Template | Called with | Prints |
 | --- | --- | --- |
-| `role` | the root data | This machine's profile name, as used in `roles` |
+| `role` | the root data | This machine's role name: the name your `roles` lists use |
 | `releases` | the root data | A JSON object: release name to `{"dest": "<home-relative path>"}`, for the releases this machine installs |
 | `packages` | `dict "manager" <m> "ctx" <root data>` | A JSON list of `{"name": ..., "id": ..., "entry": <the package table>}` for the packages of manager `<m>` this machine installs |
 

@@ -11,28 +11,21 @@ func alias(a map[string]any) map[string]any {
 	return map[string]any{"alias": map[string]any{"x": a}}
 }
 
-func TestValidateMachinesAgainstDeclaredProfiles(t *testing.T) {
+func TestValidateMachines(t *testing.T) {
 	t.Parallel()
-	declaration := map[string]any{"profile": map[string]any{"home": map[string]any{}, "minimal": map[string]any{}}}
 	tests := []struct {
 		name     string
-		matrix   map[string]any
-		machines []any
+		machines any
 		want     string // substring of the findings; empty means valid
 	}{
-		{"declared", declaration, []any{"home"}, ""},
-		{"undeclared", declaration, []any{"work"}, "machines must be a subset of the declared profiles [home minimal]"},
-		{"no declaration accepts any name", nil, []any{"anything"}, ""},
-		{"no declaration rejects empty", nil, []any{""}, "machines must be a list of non-empty names"},
+		{"any name", []any{"anything"}, ""},
+		{"empty name", []any{""}, "machines must be a list of non-empty names"},
+		{"not a list", "home", "machines must be a list of non-empty names"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			data := alias(map[string]any{"cmd": "ls", "machines": tt.machines})
-			if tt.matrix != nil {
-				data["matrix"] = tt.matrix
-			}
-			got := finding.Lines(Validate(data))
+			got := finding.Lines(Validate(alias(map[string]any{"cmd": "ls", "machines": tt.machines})))
 			switch {
 			case tt.want == "" && got != "":
 				t.Errorf("Validate() = %q, want valid", got)

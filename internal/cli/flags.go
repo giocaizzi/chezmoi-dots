@@ -33,7 +33,7 @@ func newFlags(name string) *flag.FlagSet {
 		fs.String("winget", "", "install with winget `id`")
 		fs.Var(&optValue{}, "uv", "install with uv tool; --uv=<spec> when the spec differs from the name")
 		fs.Var(&optValue{}, "npm", "install with npm; --npm=<spec> when the spec differs from the name")
-		fs.String("roles", "", "limit to `roles` (comma list of declared profiles)")
+		fs.String("roles", "", "limit to `roles` (comma list of role names your templates define)")
 		fs.String("requires", "", "install only when this [data] `answer` is set")
 		fs.Bool("release", false, "add a pinned release binary instead of a package")
 		fs.String("version", "", "release `version` to pin")

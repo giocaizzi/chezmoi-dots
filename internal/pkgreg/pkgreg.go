@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/giocaizzi/chezmoi-dots/internal/finding"
-	"github.com/giocaizzi/chezmoi-dots/internal/matrix"
 )
 
 func installKeys() []string {
@@ -37,19 +36,18 @@ func Validate(data map[string]any) []finding.Finding {
 	pkgs, _ := data["package"].(map[string]any)
 	rels, _ := data["release"].(map[string]any)
 	out := make([]finding.Finding, 0, len(pkgs)+len(rels))
-	declared := matrix.DeclaredProfiles(data)
 	for _, n := range sortedKeys(pkgs) {
 		p, _ := pkgs[n].(map[string]any)
-		out = append(out, validatePackage(n, p, declared)...)
+		out = append(out, validatePackage(n, p)...)
 	}
 	for _, n := range sortedKeys(rels) {
 		r, _ := rels[n].(map[string]any)
-		out = append(out, validateRelease(n, r, declared)...)
+		out = append(out, validateRelease(n, r)...)
 	}
 	return out
 }
 
-func validatePackage(n string, p map[string]any, declared []string) []finding.Finding {
+func validatePackage(n string, p map[string]any) []finding.Finding {
 	var out []finding.Finding
 	bad := func(format string, args ...any) { out = append(out, finding.New("package "+n, format, args...)) }
 	for _, k := range sortedKeys(p) {
@@ -60,7 +58,7 @@ func validatePackage(n string, p map[string]any, declared []string) []finding.Fi
 	if !slices.ContainsFunc(installKeys(), func(k string) bool { _, ok := p[k]; return ok }) && p["agents"] == nil {
 		bad("no install method (one of %s)", strings.Join(installKeys(), ", "))
 	}
-	out = append(out, validateCommon("package "+n, p, declared)...)
+	out = append(out, validateCommon("package "+n, p)...)
 	if s, ok := p["script"]; ok && !subset(s, []string{"darwin", "linux", "windows"}) {
 		bad("script must list operating systems")
 	}
@@ -74,15 +72,11 @@ func validatePackage(n string, p map[string]any, declared []string) []finding.Fi
 }
 
 // validateCommon checks the keys packages and releases share.
-func validateCommon(where string, t map[string]any, declared []string) []finding.Finding {
+func validateCommon(where string, t map[string]any) []finding.Finding {
 	var out []finding.Finding
 	bad := func(format string, args ...any) { out = append(out, finding.New(where, format, args...)) }
-	if r, ok := t["roles"]; ok && !rolesOK(r, declared) {
-		if declared == nil {
-			bad("roles must be a list of non-empty names")
-		} else {
-			bad("roles must be a subset of the declared profiles %v", declared)
-		}
+	if r, ok := t["roles"]; ok && !rolesOK(r) {
+		bad("roles must be a list of non-empty names")
 	}
 	if r, ok := t["requires"]; ok && !nonEmptyString(r) {
 		bad("requires must name a [data] answer")
@@ -93,7 +87,7 @@ func validateCommon(where string, t map[string]any, declared []string) []finding
 	return out
 }
 
-func validateRelease(n string, r map[string]any, declared []string) []finding.Finding {
+func validateRelease(n string, r map[string]any) []finding.Finding {
 	var out []finding.Finding
 	bad := func(format string, args ...any) { out = append(out, finding.New("release "+n, format, args...)) }
 	for _, k := range sortedKeys(r) {
@@ -110,7 +104,7 @@ func validateRelease(n string, r map[string]any, declared []string) []finding.Fi
 	if t, ok := r["type"]; ok && !slices.Contains([]string{"file", "archive", "archive-file"}, fmt.Sprint(t)) {
 		bad("type must be file, archive or archive-file")
 	}
-	out = append(out, validateCommon("release "+n, r, declared)...)
+	out = append(out, validateCommon("release "+n, r)...)
 	targets, _ := r["target"].(map[string]any)
 	if len(targets) == 0 {
 		bad("target is required")
@@ -318,16 +312,15 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
-// rolesOK reports whether v is a list of non-empty names, each a declared profile when
-// any profile is declared.
-func rolesOK(v any, declared []string) bool {
+// rolesOK reports whether v is a list of non-empty names.
+func rolesOK(v any) bool {
 	list, ok := v.([]any)
 	if !ok {
 		return false
 	}
 	for _, x := range list {
 		s, isStr := x.(string)
-		if !isStr || !ValidRole(declared, s) {
+		if !isStr || s == "" {
 			return false
 		}
 	}
