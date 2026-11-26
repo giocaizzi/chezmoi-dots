@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -44,7 +45,27 @@ source = ".chezmoidata/edit.toml"
 
 type env struct {
 	src, dest string
+	sandbox   string // HOME and XDG_* of the chezmoi subprocesses
 	vars      map[string]string
+}
+
+// sandboxEnv lists the variables that point home and the XDG dirs of a subprocess at
+// dir, so a chezmoi it starts never reads or writes the developer's own.
+func sandboxEnv(dir string) []string {
+	out := make([]string, 0, 6)
+	out = append(out, "HOME="+dir, "USERPROFILE="+dir)
+	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
+		out = append(out, k+"="+filepath.Join(dir, k))
+	}
+	return out
+}
+
+// sandboxRunner runs commands as processes with the sandbox environment.
+type sandboxRunner struct{ env []string }
+
+func (r sandboxRunner) Run(ctx context.Context, c chez.Cmd) error {
+	c.Env = append(append([]string(nil), r.env...), c.Env...)
+	return chez.ExecRunner{}.Run(ctx, c)
 }
 
 func newEnv(t *testing.T) *env {
@@ -56,7 +77,7 @@ func newEnv(t *testing.T) *env {
 		t.Skip("chezmoi is not installed")
 	}
 	root := t.TempDir()
-	e := &env{src: filepath.Join(root, "src"), dest: filepath.Join(root, "dest")}
+	e := &env{src: filepath.Join(root, "src"), dest: filepath.Join(root, "dest"), sandbox: filepath.Join(root, "sandbox")}
 	write := func(path, text string) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -103,7 +124,7 @@ func (e *env) run(t *testing.T, stdin string, args ...string) (stdout, stderr st
 	d := cli.Deps{
 		Getenv: func(k string) string { return e.vars[k] },
 		Stdin:  pr, Stdout: &out, Stderr: &errw,
-		Runner: chez.ExecRunner{}, LookPath: exec.LookPath,
+		Runner: sandboxRunner{sandboxEnv(e.sandbox)}, LookPath: exec.LookPath,
 		GOOS: runtime.GOOS, Home: e.vars["HOME"], Version: "test",
 	}
 	err = cli.Run(t.Context(), d, args)
@@ -467,7 +488,7 @@ func TestMatrixReview(t *testing.T) {
 func TestConfigTemplateFormats(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name, file, text, probe, want, notWant, xfail string
+		name, file, text, probe, want, notWant string
 	}{
 		{
 			name: "yaml", file: ".chezmoi.yaml.tmpl",
@@ -486,7 +507,6 @@ func TestConfigTemplateFormats(t *testing.T) {
 			text:  "{\"data\": {\"fromTemplate\": \"jsonc-{{ .chezmoi.os }}\"} // chezmoi accepts JSONC\n}\n",
 			probe: `{{ if eq (get . "fromTemplate" | default "") "jsonc-linux" }}{ broken{{ end }}`,
 			want:  "(linux/default)", notWant: "(darwin/",
-			xfail: ".chezmoi.jsonc.tmpl is not read, so the source is treated as having no config template",
 		},
 		{
 			name: "none", probe: `{{ if get . "featureX" }}{ broken{{ end }}`,
@@ -496,9 +516,6 @@ func TestConfigTemplateFormats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.xfail != "" {
-				t.Skip("xfail: " + tt.xfail)
-			}
 			e := newEnv(t)
 			if tt.name == "none" {
 				e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
@@ -515,6 +532,22 @@ func TestConfigTemplateFormats(t *testing.T) {
 				t.Errorf("lint templates = %v, stderr %q, want a finding for %s only", err, stderr, tt.want)
 			}
 		})
+	}
+}
+
+// Several config templates fail as in chezmoi, instead of one winning.
+func TestMultipleConfigTemplatesFail(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoi.yaml.tmpl", "data: {}\n")
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	_, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,home")
+	if err == nil || !strings.Contains(err.Error(), "multiple config file templates: .chezmoi.toml.tmpl, .chezmoi.yaml.tmpl") {
+		t.Errorf("view --as with two config templates = %v, want the multiple config file templates error", err)
+	}
+	_, _, err = e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(err.Error(), "multiple config file templates") {
+		t.Errorf("lint templates = %v, want the multiple config file templates error", err)
 	}
 }
 
@@ -550,20 +583,19 @@ func (e *env) appendConfig(t *testing.T, text string) {
 // Standalone chezmoi-dots gets no CHEZMOI_SOURCE_DIR: the source dir comes from this
 // machine's config (sourceDir). A per-configuration config replaces that config, so a
 // render that does not also name the source reads chezmoi's default source dir.
-// Not parallel: t.Setenv points HOME and the XDG dirs of the chezmoi subprocesses at a
-// temp dir holding a decoy default source, so no real source is ever read.
-func TestStandaloneSourceDirReachesConfigurations(t *testing.T) { //nolint:paralleltest // t.Setenv sandboxes the chezmoi subprocesses
+// The sandbox holds a decoy default source, so no real source is ever read.
+func TestStandaloneSourceDirReachesConfigurations(t *testing.T) {
+	t.Parallel()
 	t.Run("view --as renders the discovered source, not chezmoi's default", func(t *testing.T) {
-		t.Skip("xfail: per-configuration renders pass the rendered --config but no --source")
+		t.Parallel()
 		e := newStandaloneEnv(t)
 		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,home")
 		if err != nil || !strings.Contains(out, "hello feature") || strings.Contains(out, "decoy") {
 			t.Errorf("view --as linux,home = %q, %v, want the discovered source rendered", out, err)
 		}
 	})
-	// Today the decoy's data (no declaration) and managed list are used: a clean run.
 	t.Run("lint templates lints the discovered source, not chezmoi's default", func(t *testing.T) {
-		t.Skip("xfail: lint's isolated client (matrix data, managed lists) passes --config but no --source")
+		t.Parallel()
 		e := newStandaloneEnv(t)
 		e.writeFile(t, "dot_probe.json.tmpl", "{ broken")
 		_, stderr, err := e.run(t, "", "lint", "templates")
@@ -579,13 +611,7 @@ func TestStandaloneSourceDirReachesConfigurations(t *testing.T) { //nolint:paral
 func newStandaloneEnv(t *testing.T) *env {
 	t.Helper()
 	e := newEnv(t)
-	home := t.TempDir()
-	for _, k := range []string{"HOME", "USERPROFILE"} {
-		t.Setenv(k, home)
-	}
-	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
-		t.Setenv(k, filepath.Join(home, k))
-	}
+	home := e.sandbox
 	for _, d := range []string{filepath.Join(home, "XDG_DATA_HOME", "chezmoi"), filepath.Join(home, ".local", "share", "chezmoi")} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)

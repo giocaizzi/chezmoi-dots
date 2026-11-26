@@ -162,7 +162,7 @@ func TestStatusOnTheFixture(t *testing.T) {
 		t.Errorf("status --check before apply = %v, want ErrReported", cerr)
 	}
 
-	cz := chez.New(chez.ExecRunner{}, "chezmoi", "--config", e.vars["CHEZMOI_CONFIG_FILE"], "--source", e.src)
+	cz := chez.New(sandboxRunner{sandboxEnv(e.sandbox)}, "chezmoi", "--config", e.vars["CHEZMOI_CONFIG_FILE"], "--source", e.src)
 	if aerr := cz.Apply(t.Context(), io.Discard, io.Discard); aerr != nil {
 		t.Fatalf("apply: %v", aerr)
 	}

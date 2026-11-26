@@ -69,6 +69,9 @@ func (d Deps) service(ctx context.Context, style term.Style) (*edit.Service, err
 	if err != nil {
 		return nil, err
 	}
+	// Per-configuration renders replace the machine config, which may be the only
+	// place that names the source dir, so every client names it itself.
+	cz = cz.With("--source", src)
 	data, err := cz.Data(ctx, nil)
 	if err != nil {
 		return nil, err

@@ -72,6 +72,10 @@ func TestSelectionTemplateThroughChezmoi(t *testing.T) {
 	}
 
 	cmd := exec.CommandContext(t.Context(), bin, "--source", src, "--config", cfg, "--destination", dst, "execute-template")
+	home := t.TempDir()
+	cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home,
+		"XDG_CONFIG_HOME="+filepath.Join(home, "config"), "XDG_DATA_HOME="+filepath.Join(home, "data"),
+		"XDG_STATE_HOME="+filepath.Join(home, "state"), "XDG_CACHE_HOME="+filepath.Join(home, "cache"))
 	cmd.Stdin = bytes.NewReader([]byte(inventory.SelectionTemplate))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

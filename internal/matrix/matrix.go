@@ -399,10 +399,10 @@ func quoteAll(v []string) string {
 	return strings.Join(q, ", ")
 }
 
-// configTemplates are chezmoi's config template names, in the order chezmoi looks
-// for them; the rendered config keeps the extension of its template.
+// configTemplates are chezmoi's config template names; the rendered config keeps
+// the extension of its template.
 func configTemplates() []string {
-	return []string{".chezmoi.toml.tmpl", ".chezmoi.yaml.tmpl", ".chezmoi.json.tmpl"}
+	return []string{".chezmoi.toml.tmpl", ".chezmoi.yaml.tmpl", ".chezmoi.json.tmpl", ".chezmoi.jsonc.tmpl"}
 }
 
 // Build renders the config template once per OS and profile, writes each result into
@@ -416,6 +416,7 @@ func Build(ctx context.Context, cz *chez.Client, src, scratch string, spec Spec)
 	if err != nil {
 		return nil, err
 	}
+	cz = cz.With("--source", src)
 	configs := spec.Configs()
 	files := make([]string, len(configs))
 	var g errgroup.Group
@@ -441,19 +442,32 @@ func Build(ctx context.Context, cz *chez.Client, src, scratch string, spec Spec)
 	return entries, nil
 }
 
-// readConfigTemplate returns the first config template of src and its format's
-// extension ("toml", "yaml" or "json"); a nil template means the source has none.
+// readConfigTemplate returns the config template of src and its format's extension
+// ("toml", "yaml", "json" or "jsonc"); a nil template means the source has none.
+// Several templates are an error, as in chezmoi.
 func readConfigTemplate(src string) ([]byte, string, error) {
+	var found []string
 	for _, name := range configTemplates() {
-		b, err := os.ReadFile(filepath.Join(src, name)) //nolint:gosec // src is the user's own dotfiles source dir
+		_, err := os.Stat(filepath.Join(src, name))
 		switch {
 		case err == nil:
-			return b, strings.TrimSuffix(strings.TrimPrefix(name, ".chezmoi."), ".tmpl"), nil
+			found = append(found, name)
 		case !errors.Is(err, fs.ErrNotExist):
 			return nil, "", fmt.Errorf("read config template: %w", err)
 		}
 	}
-	return nil, "toml", nil
+	switch len(found) {
+	case 0:
+		return nil, "toml", nil
+	case 1:
+		b, err := os.ReadFile(filepath.Join(src, found[0])) //nolint:gosec // src is the user's own dotfiles source dir
+		if err != nil {
+			return nil, "", fmt.Errorf("read config template: %w", err)
+		}
+		return b, strings.TrimSuffix(strings.TrimPrefix(found[0], ".chezmoi."), ".tmpl"), nil
+	default:
+		return nil, "", fmt.Errorf("multiple config file templates: %s", strings.Join(found, ", "))
+	}
 }
 
 // writeConfig writes the config file of c into scratch and returns its path: the
