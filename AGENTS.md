@@ -16,7 +16,9 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `internal/archive/` — Lists the regular files of a `.tar.gz`, `.tgz` or `.zip` stream without extracting it (`pkg add --github` reads the binary path from it).
 - `internal/inventory/` — System package and tool inventory scanner across package managers.
 - `internal/audit/` — Live unmanaged shell alias detector (`dots audit`).
-- `internal/aliasreg/` — Cross-shell alias registry compiler.
+- `internal/aliasreg/` — Alias registry validator (`lint aliases`).
+- `internal/detect/` — Asks this machine's package managers what they know of a name (`pkg add` without a source flag).
+- `internal/ghrelease/` — Reads the latest GitHub release of a repository and derives a release entry from its assets (`pkg add --github`).
 - `internal/vaultcheck/` — Secrets registry validation and read-only secret-manager CLI probe (`dots audit secrets`); see [docs/secrets.md](docs/secrets.md).
 - `internal/cli/` — Command parsing, help and wiring of adapters into use cases.
 - `internal/survey/` — Fills the `pkg status` overview from package managers, release binaries and git.
@@ -38,12 +40,15 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 ## Development
 
 - `make check` — Run linter and tests with race detection (`check: lint test`).
-- `make lint` — Run `golangci-lint run`.
+- `make lint` — Check `go mod tidy`, then run `golangci-lint` for Linux, macOS and Windows.
 - `make test` — Run unit and integration tests with `go test -race -shuffle=on ./...`.
 - `make check-fast` — Run tests without the race detector.
 - `make test-help` — Run the focused help regression tests (from `help-tests.mk`).
 - `make test-help-goldens` — Regenerate the help golden files.
-- `make build` — Build cross-platform binaries into `bin/`.
+- `make build` — Build this host's static binary into `bin/` (release binaries come from `.github/workflows/release.yml`).
+- `make fmt` — Format, tidy and apply modernizers.
+- `make vuln` — Reachable known vulnerabilities (needs the network).
+- `make install` — Build and copy the binary to `~/.local/bin`.
 
 ## Docs
 
