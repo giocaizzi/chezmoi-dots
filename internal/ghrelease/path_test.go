@@ -250,11 +250,8 @@ func TestProposePathLeavesNoOtherTargetInThePath(t *testing.T) {
 			t.Errorf("ProposePath = %q, true; linux/amd64 renders it to an armv7 directory", got)
 		}
 	})
-	t.Run("xfail: a path every target lists is kept when a token only looks like a platform", func(t *testing.T) {
+	t.Run("a path every target lists is kept when a token only looks like a platform", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: platformSpecific rejects any path with an OS or arch token, even when every target " +
-			"is listed and agrees on it, so a toolchain such as arm-none-eabi-gcc or a darwin-helpers directory " +
-			"gets no proposal")
 		p := Proposal{Version: "1.2.3", Targets: map[string]string{"linux/amd64": "linux_amd64", "darwin/arm64": "darwin_arm64"}}
 		for name, want := range map[string]string{
 			"arm-none-eabi-gcc": "toolchain-{version}/bin/arm-none-eabi-gcc",

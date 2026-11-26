@@ -24,9 +24,9 @@ const pathSeparators = osSeparator + "/"
 // is unknown counts as executable. ok is true when at least one target has a listing,
 // each listed target has exactly one candidate, and the candidates are the same path
 // once the release version and the target's value are replaced by {version} and
-// {target} where they are whole tokens, and no OS or arch token is left in it (it
-// would be wrong for the other targets, listed or not). The returned path never ends
-// in ".exe".
+// {target} where they are whole tokens. When a target of p has no listing, the path
+// must also hold no OS or arch token: it could be wrong for that target. The returned
+// path never ends in ".exe".
 //
 // candidates is for reporting when ok is false: for every listed target the files
 // that match a name, or, when none do, up to five of its executable files.
@@ -61,18 +61,20 @@ func ProposePath(names []string, p Proposal, files map[string][]archive.File) (f
 		}
 		templated[templatePath(matches[0], p, p.Targets[k], windows)] = true
 	}
-	found, ok = settled(templated, exactlyOne)
+	allListed := !slices.ContainsFunc(slices.Collect(maps.Keys(p.Targets)), func(k string) bool { return files[k] == nil })
+	found, ok = settled(templated, exactlyOne, allListed)
 	return found, ok, candidates
 }
 
-// settled returns the one templated path every listed target agrees on; an OS or
-// arch left in it would be wrong for every other target, so it settles nothing.
-func settled(templated map[string]bool, exactlyOne bool) (string, bool) {
+// settled returns the one templated path every listed target agrees on. When some
+// target is unlisted, an OS or arch left in the path could be wrong for it, so such a
+// path settles nothing.
+func settled(templated map[string]bool, exactlyOne, allListed bool) (string, bool) {
 	if !exactlyOne || len(templated) != 1 {
 		return "", false
 	}
 	for t := range templated {
-		if !platformSpecific(t) {
+		if allListed || !platformSpecific(t) {
 			return t, true
 		}
 	}

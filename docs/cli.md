@@ -490,9 +490,10 @@ same path once the version and the target's full value are replaced by `{version
 `tool_{version}/bin/tool`; never with `.exe`). `{target}` always stands for the whole
 registry value, archive extension included: with extension-carrying values
 (`linux_amd64.tar.gz`) a directory like `tool_1.2.3_linux_amd64` is not settled and is
-reported as not found. A path that still names an OS or an arch (`linux`, `amd64`,
-`x86_64`, ...) once templated is never proposed, even when only one target could be
-listed, since it would be wrong for the other targets. Otherwise the `path` stays the repository name. A `.tar.xz` archive is not listed, and targets with one are left out
+reported as not found. When some target could not be listed (a `.tar.xz`, say), a path
+that still names an OS or an arch (`linux`, `amd64`, `x86_64`, ...) once templated is
+not proposed, since it could be wrong for that target; when every target is listed
+and they all agree on the path, it is proposed as is (`toolchain-{version}/bin/arm-none-eabi-gcc`). Otherwise the `path` stays the repository name. A `.tar.xz` archive is not listed, and targets with one are left out
 of the check; an archive that cannot be read counts the same.
 
 Listing is bounded against hostile archives: entry names over 4096 bytes or more
