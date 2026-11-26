@@ -87,12 +87,16 @@ func TestWithDoesNotAliasGlobals(t *testing.T) {
 func TestManaged(t *testing.T) {
 	t.Parallel()
 	r := &fakeRunner{stdout: `{"/h/.zshrc":{"sourceRelative":"dot_zshrc"}}`}
-	got, err := New(r, "chezmoi").Managed(t.Context(), nil)
+	got, err := New(r, "chezmoi", "--config", "/real").Managed(t.Context(), "/per-config.yaml", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if diff := cmp.Diff(map[string]string{"/h/.zshrc": "dot_zshrc"}, got); diff != "" {
 		t.Errorf("Managed() (-want +got):\n%s", diff)
+	}
+	// The per-configuration file comes last, so it wins over the client's own.
+	if a := r.calls[0]; len(a) < 5 || a[1] != "--config" || a[2] != "/real" || a[3] != "--config" || a[4] != "/per-config.yaml" {
+		t.Errorf("argv = %v, want the client's --config then /per-config.yaml", a)
 	}
 }
 
@@ -127,33 +131,5 @@ func TestStateAndChanged(t *testing.T) {
 	}
 	if _, err := DecodeState([]byte(`nope`)); err == nil {
 		t.Error("DecodeState(garbage): want an error")
-	}
-}
-
-func TestConfigData(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name, stdout string
-		want         map[string]any
-	}{
-		{"data", `{"destDir":"/d","data":{"Tools":["a"],"work":true}}`, map[string]any{"Tools": []any{"a"}, "work": true}},
-		{"no data", `{"destDir":"/d"}`, map[string]any{}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			r := &fakeRunner{stdout: tt.stdout}
-			got, err := New(r, "chezmoi", "--config", "/c").ConfigData(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			if diff := cmp.Diff(tt.want, got); diff != "" {
-				t.Errorf("ConfigData() (-want +got):\n%s", diff)
-			}
-			want := []string{"chezmoi", "--config", "/c", "dump-config", "--format", "json"}
-			if diff := cmp.Diff(want, r.calls[0]); diff != "" {
-				t.Errorf("argv (-want +got):\n%s", diff)
-			}
-		})
 	}
 }

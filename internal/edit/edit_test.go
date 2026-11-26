@@ -51,7 +51,7 @@ func (f *fakeCZ) next(kind string, states []chez.State) (chez.State, error) {
 	return states[min(i, len(states)-1)], nil
 }
 
-func (f *fakeCZ) SourcePath(context.Context, string, chez.Overrides) (string, error) {
+func (f *fakeCZ) SourcePath(context.Context, string, string, chez.Overrides) (string, error) {
 	return "", errors.New("not managed")
 }
 func (f *fakeCZ) TargetPath(context.Context) (string, error) { return f.home, nil }
@@ -61,18 +61,22 @@ func (f *fakeCZ) EditConfig(context.Context) (chez.EditConfig, error) {
 	return cfg, nil
 }
 
-func (f *fakeCZ) Dump(_ context.Context, o chez.Overrides) (chez.State, error) {
-	if o == nil {
+func (f *fakeCZ) Dump(_ context.Context, cfg string, _ chez.Overrides) (chez.State, error) {
+	if cfg == "" {
 		return f.next("here", f.here)
 	}
 	return f.next("conf", f.conf)
 }
 
-func (f *fakeCZ) Managed(context.Context, chez.Overrides) (map[string]string, error) {
+func (f *fakeCZ) Managed(context.Context, string, chez.Overrides) (map[string]string, error) {
 	return map[string]string{}, nil
 }
-func (f *fakeCZ) Cat(context.Context, string, chez.Overrides) ([]byte, error) { return nil, nil }
-func (f *fakeCZ) Status(context.Context, ...string) (string, error)           { return f.status, nil }
+
+func (f *fakeCZ) Cat(context.Context, string, string, chez.Overrides) ([]byte, error) {
+	return nil, nil
+}
+
+func (f *fakeCZ) Status(context.Context, ...string) (string, error) { return f.status, nil }
 
 func (f *fakeCZ) Diff(_ context.Context, _, _ io.Writer, t ...string) error {
 	f.diffed = t
@@ -206,7 +210,7 @@ func newRig(t *testing.T, e registry.Entry, states ...chez.State) *rig {
 	r.svc = &Service{
 		CZ: r.cz, Registry: reg,
 		Matrix: func(context.Context, string) ([]matrix.Entry, error) {
-			return []matrix.Entry{{OS: "linux", Profile: "home", Overrides: chez.Overrides{"featureX": true}}}, nil
+			return []matrix.Entry{{OS: "linux", Profile: "home", ConfigFile: "home.toml", Overrides: chez.Overrides{"featureX": true}}}, nil
 		},
 		Tree: tree.New(fstest.MapFS{}), Editor: r.ed, Check: r.chk, Prompt: r.pr, Git: r.git, Src: src,
 		Out: io.Discard, Err: r.errw, Style: term.Style{},

@@ -160,14 +160,23 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 	}
 	// A template is rendered only where chezmoi manages it: .chezmoiignore, rendered
 	// with the configuration's data, keeps gated templates (secrets, network) out.
+	// A configuration whose managed list fails is a finding and is not rendered; the
+	// others go on.
+	var (
+		out []finding.Finding
+		mu  sync.Mutex
+	)
 	managed := make([]map[string]bool, len(entries))
 	var mg errgroup.Group
 	mg.SetLimit(4)
 	for i, e := range entries {
 		mg.Go(func() error {
-			m, err := l.Iso.Managed(ctx, e.Overrides)
+			m, err := l.Iso.Managed(ctx, e.ConfigFile, e.Overrides)
 			if err != nil {
-				return fmt.Errorf("list managed files for %s: %w", e.Label(), err)
+				mu.Lock()
+				out = append(out, finding.New(e.Label(), "cannot list the managed files: %v", err))
+				mu.Unlock()
+				return nil
 			}
 			managed[i] = map[string]bool{}
 			for _, src := range m {
@@ -176,14 +185,8 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 			return nil
 		})
 	}
-	if err := mg.Wait(); err != nil {
-		return nil, err
-	}
-	var (
-		out []finding.Finding
-		mu  sync.Mutex
-		g   errgroup.Group
-	)
+	_ = mg.Wait()
+	var g errgroup.Group
 	g.SetLimit(8)
 	for _, f := range files {
 		tmpl, err := os.ReadFile(filepath.Join(l.Src, filepath.FromSlash(f)))
@@ -352,7 +355,7 @@ func linterArgv(ext string, rendered []byte, path, goos string) (argv []string, 
 // apply to that entry and is skipped.
 func (l Linter) renderAndLint(ctx context.Context, file string, tmpl []byte, e matrix.Entry, n int) []finding.Finding {
 	where := fmt.Sprintf("%s (%s)", file, e.Label())
-	rendered, err := l.Iso.Execute(ctx, e.Overrides, tmpl, false)
+	rendered, err := l.Iso.With("--config", e.ConfigFile).Execute(ctx, e.Overrides, tmpl, false)
 	if err != nil {
 		return []finding.Finding{finding.New(where, "does not render: %v", err)}
 	}

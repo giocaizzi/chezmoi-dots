@@ -8,7 +8,9 @@ package matrix
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -72,13 +74,16 @@ func Parse(s string) (Config, error) {
 	return Config{OS: osName, Profile: profile}, nil
 }
 
-// Entry is a configuration with the data it renders with. Variant names the extra
-// configuration of a Spec variant; it is empty for the base configurations.
+// Entry is a configuration with what it renders with: ConfigFile, its rendered
+// chezmoi config (passed as --config), and Overrides, the OS and a variant's data over
+// it. Variant names the extra configuration of a Spec variant; it is empty for the
+// base configurations.
 type Entry struct {
 	Config
 
-	Variant   string
-	Overrides chez.Overrides
+	Variant    string
+	ConfigFile string
+	Overrides  chez.Overrides
 }
 
 // Label is "<os>/<profile>", followed by " [<variant>]" for a variant.
@@ -394,103 +399,84 @@ func quoteAll(v []string) string {
 	return strings.Join(q, ", ")
 }
 
-// Build renders the config template once per OS and profile and returns every
-// configuration with its overrides. cz must target the source dir src; scratch is a
-// temp dir. Every configuration carries the same keys: one a render leaves out is off
-// (the zero value), never inherited from this machine.
+// configTemplates are chezmoi's config template names, in the order chezmoi looks
+// for them; the rendered config keeps the extension of its template.
+func configTemplates() []string {
+	return []string{".chezmoi.toml.tmpl", ".chezmoi.yaml.tmpl", ".chezmoi.json.tmpl"}
+}
+
+// Build renders the config template once per OS and profile, writes each result into
+// scratch, and returns every configuration with the path of its config file: running
+// chezmoi with that file as --config gives templates the data `chezmoi init` would
+// store, and the Overrides then only set the OS. A source with no config template
+// gets a config holding the profile's answers as [data]. cz must target the source
+// dir src; scratch is a temp dir that must outlive the renders that use the entries.
 func Build(ctx context.Context, cz *chez.Client, src, scratch string, spec Spec) ([]Entry, error) {
-	tmpl, err := os.ReadFile(filepath.Join(src, ".chezmoi.toml.tmpl")) //nolint:gosec // src is the user's own dotfiles source dir
-	if err != nil {
-		return nil, fmt.Errorf("read config template: %w", err)
-	}
-	machine, err := cz.ConfigData(ctx)
+	tmpl, ext, err := readConfigTemplate(src)
 	if err != nil {
 		return nil, err
 	}
 	configs := spec.Configs()
-	rendered := make([]map[string]any, len(configs))
+	files := make([]string, len(configs))
 	var g errgroup.Group
 	g.SetLimit(4)
 	for i, c := range configs {
 		g.Go(func() error {
 			var err error
-			rendered[i], err = renderConfig(ctx, cz, tmpl, scratch, c, spec.Answers(c.Profile))
+			files[i], err = writeConfig(ctx, cz, tmpl, ext, scratch, c, spec.Answers(c.Profile))
 			return err
 		})
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-	data := map[string]map[string]any{}
-	for i, c := range configs {
-		data[c.Label()] = rendered[i]
-	}
-	uniform(data, machine)
 	entries := make([]Entry, 0, len(configs))
-	for _, c := range configs {
-		o := chez.Overrides(data[c.Label()]).Clone(chez.Overrides{chezmoiKey: map[string]any{"os": c.OS}})
-		entries = append(entries, Entry{Config: c, Overrides: o})
+	for i, c := range configs {
+		entries = append(entries, Entry{
+			Config:     c,
+			ConfigFile: files[i],
+			Overrides:  chez.Overrides{chezmoiKey: map[string]any{"os": c.OS}},
+		})
 	}
 	return entries, nil
 }
 
-// renderConfig renders the config template for c with answers as the seed config and
-// returns the [data] of the result.
-func renderConfig(ctx context.Context, cz *chez.Client, tmpl []byte, scratch string, c Config, answers map[string]any) (map[string]any, error) {
+// readConfigTemplate returns the first config template of src and its format's
+// extension ("toml", "yaml" or "json"); a nil template means the source has none.
+func readConfigTemplate(src string) ([]byte, string, error) {
+	for _, name := range configTemplates() {
+		b, err := os.ReadFile(filepath.Join(src, name)) //nolint:gosec // src is the user's own dotfiles source dir
+		switch {
+		case err == nil:
+			return b, strings.TrimSuffix(strings.TrimPrefix(name, ".chezmoi."), ".tmpl"), nil
+		case !errors.Is(err, fs.ErrNotExist):
+			return nil, "", fmt.Errorf("read config template: %w", err)
+		}
+	}
+	return nil, "toml", nil
+}
+
+// writeConfig writes the config file of c into scratch and returns its path: the
+// config template rendered with answers as the seed config, or the answers as TOML
+// when there is no template.
+func writeConfig(ctx context.Context, cz *chez.Client, tmpl []byte, ext, scratch string, c Config, answers map[string]any) (string, error) {
 	name := c.OS + "-" + c.Profile
-	seedPath := filepath.Join(scratch, "seed-"+name+".toml")
-	if err := os.WriteFile(seedPath, []byte(TOML(answers)), 0o600); err != nil {
-		return nil, fmt.Errorf("write seed config: %w", err)
-	}
-	out, err := cz.With("--config", seedPath).Execute(ctx, chez.Overrides{chezmoiKey: map[string]any{"os": c.OS}}, tmpl, true)
-	if err != nil {
-		return nil, fmt.Errorf("render config template for %s: %w", c.Label(), err)
-	}
-	renderedPath := filepath.Join(scratch, "config-"+name+".toml")
-	if err = os.WriteFile(renderedPath, out, 0o600); err != nil { //nolint:gosec // renderedPath is inside the scratch dir this process created
-		return nil, fmt.Errorf("write rendered config: %w", err)
-	}
-	return cz.With("--config", renderedPath).ConfigData(ctx)
-}
-
-// uniform gives every configuration the union of the configurations' keys and of this
-// machine's config data (minus chezmoi's own): one missing a key gets the zero value
-// of the type another configuration, or the machine, has for it, so nothing from the
-// machine's config reaches a configuration the renders do not produce.
-func uniform(data map[string]map[string]any, machine map[string]any) {
-	zeros := map[string]any{}
-	for _, name := range sortedKeys(data) {
-		for k, v := range data[name] {
-			if _, ok := zeros[k]; !ok {
-				zeros[k] = zeroOf(v)
-			}
+	seed := []byte(TOML(answers))
+	out := seed
+	if tmpl != nil {
+		seedPath := filepath.Join(scratch, "seed-"+name+".toml")
+		if err := os.WriteFile(seedPath, seed, 0o600); err != nil {
+			return "", fmt.Errorf("write seed config: %w", err)
+		}
+		var err error
+		out, err = cz.With("--config", seedPath).Execute(ctx, chez.Overrides{chezmoiKey: map[string]any{"os": c.OS}}, tmpl, true)
+		if err != nil {
+			return "", fmt.Errorf("render config template for %s: %w", c.Label(), err)
 		}
 	}
-	for k, v := range machine {
-		if _, ok := zeros[k]; !ok && k != chezmoiKey {
-			zeros[k] = zeroOf(v)
-		}
+	path := filepath.Join(scratch, "config-"+name+"."+ext)
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return "", fmt.Errorf("write rendered config: %w", err)
 	}
-	for _, d := range data {
-		for k, z := range zeros {
-			if _, ok := d[k]; !ok {
-				d[k] = z
-			}
-		}
-	}
-}
-
-func zeroOf(v any) any {
-	switch v.(type) {
-	case bool:
-		return false
-	case []any:
-		return []any{}
-	case float64:
-		return float64(0)
-	case map[string]any:
-		return map[string]any{}
-	default:
-		return ""
-	}
+	return path, nil
 }

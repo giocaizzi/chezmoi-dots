@@ -248,24 +248,6 @@ func TestEntryLabel(t *testing.T) {
 	}
 }
 
-func TestUniform(t *testing.T) {
-	t.Parallel()
-	data := map[string]map[string]any{
-		"linux/a": {"tools": []any{"a"}, "on": true, "n": float64(2), "s": "x", "m": map[string]any{"k": 1}},
-		"linux/b": {"tools": []any{"b"}},
-		"linux/c": {},
-	}
-	machine := map[string]any{"tools": []any{"z"}, "machineOnly": "x", "machineList": []any{"y"}, "chezmoi": map[string]any{"os": "linux"}}
-	uniform(data, machine)
-	want := map[string]any{"tools": []any{}, "on": false, "n": float64(0), "s": "", "m": map[string]any{}, "machineOnly": "", "machineList": []any{}}
-	if diff := cmp.Diff(want, data["linux/c"]); diff != "" {
-		t.Errorf("linux/c (-want +got):\n%s", diff)
-	}
-	if diff := cmp.Diff([]any{"b"}, data["linux/b"]["tools"]); diff != "" {
-		t.Errorf("linux/b tools changed (-want +got):\n%s", diff)
-	}
-}
-
 func TestTOML(t *testing.T) {
 	t.Parallel()
 	got := TOML(map[string]any{"b": true, "a": `x"y`, "c": []string{"p", "q"}, "d": []any{"r", "s"}})

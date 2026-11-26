@@ -36,6 +36,7 @@ func (s *Service) List() {
 type run struct {
 	label   string
 	profile string
+	cfg     string
 	o       chez.Overrides
 }
 
@@ -91,7 +92,7 @@ func (s *Service) runs(ctx context.Context, mode ViewMode, as matrix.Config, scr
 	var out []run
 	for _, e := range entries {
 		if mode == ViewMatrix || e.Config == as {
-			out = append(out, run{label: e.Label(), profile: e.Profile, o: e.Overrides})
+			out = append(out, run{label: e.Label(), profile: e.Profile, cfg: e.ConfigFile, o: e.Overrides})
 		}
 	}
 	return out, nil
@@ -134,7 +135,7 @@ func (s *Service) viewEntry(ctx context.Context, name, source, desc string, runs
 	g.SetLimit(4)
 	for i, r := range runs {
 		g.Go(func() error {
-			reach[i], fail[i] = s.reaches(ctx, r.o, source)
+			reach[i], fail[i] = s.reaches(ctx, r, source)
 			return nil
 		})
 	}
@@ -223,8 +224,8 @@ func (s *Service) renderMatrixLegend(uniquePaths []string, pathColors map[string
 }
 
 // reaches lists, comma-separated, the targets one configuration builds from source.
-func (s *Service) reaches(ctx context.Context, o chez.Overrides, source string) (string, error) {
-	managed, err := s.CZ.Managed(ctx, o)
+func (s *Service) reaches(ctx context.Context, r run, source string) (string, error) {
+	managed, err := s.CZ.Managed(ctx, r.cfg, r.o)
 	if err != nil {
 		return "", fmt.Errorf("managed targets: %w", err)
 	}
@@ -258,7 +259,7 @@ func groupRenders(runs []run, rendered []*string) (groups []*renderGroup, missin
 // firstSource finds the source file of target, on this machine or else on any run.
 func (s *Service) firstSource(ctx context.Context, target string, runs []run) string {
 	for _, r := range append([]run{{}}, runs...) {
-		if p, err := s.CZ.SourcePath(ctx, target, r.o); err == nil {
+		if p, err := s.CZ.SourcePath(ctx, target, r.cfg, r.o); err == nil {
 			return p
 		}
 	}
@@ -279,7 +280,7 @@ func (s *Service) viewTarget(ctx context.Context, target string, mode ViewMode, 
 	fmt.Fprintf(s.Out, "%s▸ tree%s\n", st.B, st.O)
 	st.Tree(s.Out, s.Tree.Of(filepath.ToSlash(rel)), s.entrySources())
 	if mode == ViewHere {
-		out, err := s.CZ.Cat(ctx, target, nil)
+		out, err := s.CZ.Cat(ctx, target, "", nil)
 		if err != nil {
 			return fmt.Errorf("render %s: %w", target, err)
 		}
@@ -292,7 +293,7 @@ func (s *Service) viewTarget(ctx context.Context, target string, mode ViewMode, 
 	g.SetLimit(4)
 	for i, r := range runs {
 		g.Go(func() error {
-			if out, err := s.CZ.Cat(ctx, target, r.o); err == nil {
+			if out, err := s.CZ.Cat(ctx, target, r.cfg, r.o); err == nil {
 				text := string(out)
 				rendered[i] = &text
 			}

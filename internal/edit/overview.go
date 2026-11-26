@@ -33,7 +33,7 @@ func (s *Service) ViewOverview(ctx context.Context) error {
 	g.SetLimit(4)
 	for i, e := range entries {
 		g.Go(func() error {
-			m, err := s.CZ.Managed(ctx, e.Overrides)
+			m, err := s.CZ.Managed(ctx, e.ConfigFile, e.Overrides)
 			if err != nil {
 				return err
 			}

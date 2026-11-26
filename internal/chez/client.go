@@ -45,6 +45,16 @@ func (c *Client) With(global ...string) *Client {
 	return &n
 }
 
+// in returns the client targeting configuration file cfg, or c itself when cfg is
+// empty. The file replaces the client's own config (the last --config wins), so its
+// data reaches templates as chezmoi init would store it.
+func (c *Client) in(cfg string) *Client {
+	if cfg == "" {
+		return c
+	}
+	return c.With("--config", cfg)
+}
+
 // render marks a read-only render of the source: .chezmoiexternal.toml.tmpl then
 // declares no externals, so nothing is downloaded for a preview.
 func render(o Overrides) Overrides { return o.Clone(Overrides{"dotsRender": true}) }
@@ -94,28 +104,10 @@ func (c *Client) Data(ctx context.Context, o Overrides) (map[string]any, error) 
 	return m, nil
 }
 
-// ConfigData returns the [data] table of the configuration file the client targets
-// (chezmoi dump-config), without the computed template data.
-func (c *Client) ConfigData(ctx context.Context) (map[string]any, error) {
-	out, err := c.output(ctx, nil, nil, "dump-config", "--format", "json")
-	if err != nil {
-		return nil, err
-	}
-	var cfg struct {
-		Data map[string]any `json:"data"`
-	}
-	if err := json.Unmarshal(out, &cfg); err != nil {
-		return nil, fmt.Errorf("decode chezmoi config: %w", err)
-	}
-	if cfg.Data == nil {
-		cfg.Data = map[string]any{}
-	}
-	return cfg.Data, nil
-}
-
-// Dump returns the target state without directories and externals.
-func (c *Client) Dump(ctx context.Context, o Overrides) (State, error) {
-	out, err := c.output(ctx, render(o), nil, "dump", "--exclude", "dirs,externals", "--format", "json")
+// Dump returns the target state without directories and externals, rendered with
+// configuration file cfg (empty: the client's own) and the overrides o.
+func (c *Client) Dump(ctx context.Context, cfg string, o Overrides) (State, error) {
+	out, err := c.in(cfg).output(ctx, render(o), nil, "dump", "--exclude", "dirs,externals", "--format", "json")
 	if err != nil {
 		return nil, err
 	}
@@ -160,8 +152,8 @@ func Changed(before, after State) []string {
 }
 
 // Managed maps each managed target to its source path relative to the source dir.
-func (c *Client) Managed(ctx context.Context, o Overrides) (map[string]string, error) {
-	out, err := c.output(ctx, render(o), nil, "managed", "-i", "files,symlinks,scripts", "-x", "externals", "-p", "all", "-f", "json")
+func (c *Client) Managed(ctx context.Context, cfg string, o Overrides) (map[string]string, error) {
+	out, err := c.in(cfg).output(ctx, render(o), nil, "managed", "-i", "files,symlinks,scripts", "-x", "externals", "-p", "all", "-f", "json")
 	if err != nil {
 		return nil, err
 	}
@@ -179,17 +171,17 @@ func (c *Client) Managed(ctx context.Context, o Overrides) (map[string]string, e
 }
 
 // Cat returns what chezmoi would write for target.
-func (c *Client) Cat(ctx context.Context, target string, o Overrides) ([]byte, error) {
-	return c.output(ctx, render(o), nil, "cat", target)
+func (c *Client) Cat(ctx context.Context, target, cfg string, o Overrides) ([]byte, error) {
+	return c.in(cfg).output(ctx, render(o), nil, "cat", target)
 }
 
 // SourcePath returns the source dir (target empty) or a target's source file.
-func (c *Client) SourcePath(ctx context.Context, target string, o Overrides) (string, error) {
+func (c *Client) SourcePath(ctx context.Context, target, cfg string, o Overrides) (string, error) {
 	sub := []string{"source-path"}
 	if target != "" {
 		sub = append(sub, target)
 	}
-	out, err := c.output(ctx, render(o), nil, sub...)
+	out, err := c.in(cfg).output(ctx, render(o), nil, sub...)
 	return strings.TrimSpace(string(out)), err
 }
 

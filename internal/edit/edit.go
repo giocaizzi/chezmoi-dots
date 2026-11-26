@@ -30,12 +30,12 @@ var ErrUsage = errors.New("usage")
 
 // Chezmoi is the part of chezmoi the flow uses; *chez.Client implements it.
 type Chezmoi interface {
-	SourcePath(ctx context.Context, target string, o chez.Overrides) (string, error)
+	SourcePath(ctx context.Context, target, cfg string, o chez.Overrides) (string, error)
 	TargetPath(ctx context.Context) (string, error)
 	EditConfig(ctx context.Context) (chez.EditConfig, error)
-	Dump(ctx context.Context, o chez.Overrides) (chez.State, error)
-	Managed(ctx context.Context, o chez.Overrides) (map[string]string, error)
-	Cat(ctx context.Context, target string, o chez.Overrides) ([]byte, error)
+	Dump(ctx context.Context, cfg string, o chez.Overrides) (chez.State, error)
+	Managed(ctx context.Context, cfg string, o chez.Overrides) (map[string]string, error)
+	Cat(ctx context.Context, target, cfg string, o chez.Overrides) ([]byte, error)
 	Status(ctx context.Context, targets ...string) (string, error)
 	Diff(ctx context.Context, w, errw io.Writer, targets ...string) error
 	Apply(ctx context.Context, stdout, stderr io.Writer, targets ...string) error
@@ -153,7 +153,7 @@ func (s *Service) editFile(ctx context.Context, file string) error {
 
 // pickNode lets the user pick which source file a target is made of.
 func (s *Service) pickNode(ctx context.Context, target string) (string, error) {
-	source, err := s.CZ.SourcePath(ctx, target, nil)
+	source, err := s.CZ.SourcePath(ctx, target, "", nil)
 	if err != nil {
 		fmt.Fprintf(s.Err, "%s✗ dots: %s is no registry entry, source file or managed target%s (chezmoi dots help)\n", s.Style.R, target, s.Style.O)
 		return "", ErrUsage
@@ -208,12 +208,12 @@ func (s *Service) snapshot(ctx context.Context, entries []matrix.Entry) snapshot
 	var g errgroup.Group
 	g.SetLimit(4)
 	g.Go(func() error {
-		snap.here.state, snap.here.err = s.CZ.Dump(ctx, nil)
+		snap.here.state, snap.here.err = s.CZ.Dump(ctx, "", nil)
 		return nil
 	})
 	for i, e := range entries {
 		g.Go(func() error {
-			snap.conf[i].state, snap.conf[i].err = s.CZ.Dump(ctx, e.Overrides)
+			snap.conf[i].state, snap.conf[i].err = s.CZ.Dump(ctx, e.ConfigFile, e.Overrides)
 			return nil
 		})
 	}

@@ -41,7 +41,7 @@ func (d Deps) chezmoi() (*chez.Client, []string) {
 func (d Deps) sourceDir(ctx context.Context, cz *chez.Client) (string, error) {
 	v := d.Getenv("CHEZMOI_SOURCE_DIR")
 	if v == "" {
-		src, err := cz.SourcePath(ctx, "", nil)
+		src, err := cz.SourcePath(ctx, "", "", nil)
 		if err != nil {
 			return "", fmt.Errorf("find the chezmoi source dir: %w", err)
 		}
