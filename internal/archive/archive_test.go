@@ -11,9 +11,9 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -435,11 +435,26 @@ func TestListZipCentralDirectory(t *testing.T) {
 	})
 }
 
+func TestListZipUnderstatedEntryCount(t *testing.T) {
+	t.Parallel()
+	// Raw empty-name central directory headers, and an end record that declares one of them.
+	hdr := make([]byte, 46)
+	copy(hdr, "PK\x01\x02")
+	dir := bytes.Repeat(hdr, archive.MaxEntries+1)
+	eocd := make([]byte, 22)
+	copy(eocd, "PK\x05\x06")
+	binary.LittleEndian.PutUint16(eocd[10:], 1)
+	binary.LittleEndian.PutUint32(eocd[12:], 46)
+	data := slices.Concat(dir, eocd)
+	if _, err := archive.List(archive.Zip, bytes.NewReader(data)); !errors.Is(err, archive.ErrTooManyEntries) {
+		t.Errorf("List = %v, want %v", err, archive.ErrTooManyEntries)
+	}
+}
+
 func TestListLimitsAtTheTop(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: a MaxDecompressed of math.MaxInt64 does not panic", func(t *testing.T) {
+	t.Run("a MaxDecompressed of math.MaxInt64 does not panic", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: capReader computes c.left+1, which overflows to math.MinInt64 and slices p[:MinInt64]")
 		l := archive.DefaultLimits()
 		l.MaxDecompressed = math.MaxInt64 // no practical cap
 		files, err := archive.ListLimits(archive.TarGz, bytes.NewReader(tarGz(t, []entry{{name: "tool", mode: 0o755}})), l)
@@ -449,55 +464,25 @@ func TestListLimitsAtTheTop(t *testing.T) {
 	})
 }
 
+func TestListZeroLimitsMeanDefaults(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		kind archive.Kind
+		data []byte
+	}{
+		"tar.gz": {archive.TarGz, tarGz(t, []entry{{name: "d/tool", mode: 0o755}})},
+		"zip":    {archive.Zip, zipBytes(t, []entry{{name: "d/tool", mode: 0o755}}, true)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			files, err := archive.ListLimits(tc.kind, bytes.NewReader(tc.data), archive.Limits{})
+			if err != nil || len(files) != 1 {
+				t.Errorf("ListLimits(Limits{}) = %v, %v; want one file", files, err)
+			}
+		})
+	}
+}
+
 type readerFunc func([]byte) (int, error)
 
 func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
-
-// gateReader serves its data in two reads and makes the second wait for release.
-type gateReader struct {
-	data    []byte
-	started chan struct{} // closed on the first Read
-	release chan struct{} // the second Read waits on it
-	reads   int
-}
-
-func (g *gateReader) Read(p []byte) (int, error) {
-	g.reads++
-	switch g.reads {
-	case 1:
-		close(g.started)
-		return copy(p, g.data[:1]), nil
-	case 2:
-		<-g.release
-		return copy(p, g.data[1:]), nil
-	}
-	return 0, io.EOF
-}
-
-func TestListSpoolsOneZipAtATime(t *testing.T) {
-	t.Parallel()
-	data := zipBytes(t, []entry{{name: "tool", mode: 0o755}}, true)
-	first := &gateReader{data: data, started: make(chan struct{}), release: make(chan struct{})}
-	second := &gateReader{data: data, started: make(chan struct{}), release: make(chan struct{})}
-	close(second.release)
-	done := make(chan error, 2)
-	go func() { _, err := archive.List(archive.Zip, first); done <- err }()
-	<-first.started
-	go func() { _, err := archive.List(archive.Zip, second); done <- err }()
-	select {
-	case <-second.started:
-		t.Fatal("a second zip started spooling while the first was still spooling")
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(first.release)
-	for range 2 {
-		if err := <-done; err != nil {
-			t.Errorf("List = %v", err)
-		}
-	}
-	select {
-	case <-second.started:
-	default:
-		t.Error("the second zip never spooled")
-	}
-}

@@ -258,7 +258,9 @@ func (f Finder) Sums(ctx context.Context, r pkgreg.Release, version string) (map
 // inside it. files[platform] is nil when the archive is of another kind or cannot be
 // read, including one over the archive package's limits (name length, decompressed
 // size, zip spool size); the checksum is of the whole download either way, because
-// fetch drains the body after the listing stops. Zips are spooled one at a time.
+// fetch drains the body after the listing stops. A zip is spooled to disk, so the
+// zips of one call are downloaded one at a time; the wait for that slot happens before
+// the download's DownloadTimeout starts, and honours ctx.
 func (f Finder) Inspect(ctx context.Context, r pkgreg.Release, version string) (sums map[string]string, files map[string][]archive.File, err error) {
 	return f.inspect(ctx, r, version, true)
 }
@@ -269,11 +271,20 @@ func (f Finder) inspect(ctx context.Context, r pkgreg.Release, version string, l
 	listed := make([][]archive.File, len(platforms))
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(3)
+	zipSlot := make(chan struct{}, 1) // one zip spooled to disk at a time
 	for i, p := range platforms {
 		g.Go(func() error {
 			url := r.AssetURL(version, p)
 			var consume func(io.Reader) error
 			if kind := archive.KindOf(url); list && kind != archive.None {
+				if kind == archive.Zip {
+					select {
+					case zipSlot <- struct{}{}:
+						defer func() { <-zipSlot }()
+					case <-ctx.Done():
+						return fmt.Errorf("wait to download %s: %w", url, context.Cause(ctx))
+					}
+				}
 				consume = func(body io.Reader) error {
 					var err error
 					listed[i], err = archive.List(kind, body)

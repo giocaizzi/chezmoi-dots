@@ -8,7 +8,7 @@ package archive
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
+	"bufio"
 	"compress/gzip"
 	"encoding/binary"
 	"errors"
@@ -18,7 +18,6 @@ import (
 	"os"
 	"path"
 	"strings"
-	"sync"
 )
 
 // MaxEntries is the most entries List reads before it gives up.
@@ -35,7 +34,9 @@ var (
 )
 
 // Limits bounds what List reads and keeps from one archive. An archive over a limit
-// is an error: the caller reports it as unchecked.
+// is an error: the caller reports it as unchecked. A zero field means that field's
+// default from DefaultLimits, so Limits{} is DefaultLimits(); a limit cannot be
+// switched off, but math.MaxInt64 is a cap no archive reaches.
 type Limits struct {
 	MaxNameLen   int   // longest entry name, in bytes
 	MaxNameBytes int64 // total bytes of the names kept
@@ -55,6 +56,27 @@ func DefaultLimits() Limits {
 		MaxDecompressed: 4 << 30,
 		MaxZipSpool:     256 << 20, MaxCentralDir: 64 << 20,
 	}
+}
+
+// withDefaults replaces every zero field by its default.
+func (l Limits) withDefaults() Limits {
+	d := DefaultLimits()
+	if l.MaxNameLen == 0 {
+		l.MaxNameLen = d.MaxNameLen
+	}
+	if l.MaxNameBytes == 0 {
+		l.MaxNameBytes = d.MaxNameBytes
+	}
+	if l.MaxDecompressed == 0 {
+		l.MaxDecompressed = d.MaxDecompressed
+	}
+	if l.MaxZipSpool == 0 {
+		l.MaxZipSpool = d.MaxZipSpool
+	}
+	if l.MaxCentralDir == 0 {
+		l.MaxCentralDir = d.MaxCentralDir
+	}
+	return l
 }
 
 // names checks the names of the entries List keeps against the limits.
@@ -105,7 +127,8 @@ type File struct {
 // List returns the regular files of the archive of the given kind read from r, in
 // archive order. Directories, symlinks and other special entries are skipped. A zip
 // is spooled to a temporary file, which is removed before List returns; it is never
-// extracted, and only one zip is spooled at a time across callers. For a tar, r is
+// extracted. Each call spools its own file, so a caller that lists several zips bounds
+// their concurrency itself (disk use is up to MaxZipSpool per call). For a tar, r is
 // read up to the end of the tar stream only; for a zip too large to list, up to the
 // spool limit. After an error the rest of r is unread, so a caller that needs the
 // whole body (to checksum it) must drain r itself. Entry names are path.Clean of the
@@ -116,8 +139,10 @@ func List(kind Kind, r io.Reader) ([]File, error) {
 	return ListLimits(kind, r, DefaultLimits())
 }
 
-// ListLimits is List with explicit limits.
+// ListLimits is List with explicit limits. A zip is spooled to a temporary file of up
+// to MaxZipSpool bytes for the length of the call; callers bound how many run at once.
 func ListLimits(kind Kind, r io.Reader, l Limits) ([]File, error) {
+	l = l.withDefaults()
 	switch kind {
 	case TarGz:
 		return listTarGz(r, l)
@@ -144,7 +169,7 @@ func (c *capReader) Read(p []byte) (int, error) {
 	if c.left < 0 {
 		return 0, ErrTooLarge
 	}
-	if int64(len(p)) > c.left+1 {
+	if int64(len(p))-1 > c.left { // read at most one byte past the cap; c.left+1 could overflow in the other form
 		p = p[:c.left+1]
 	}
 	n, err := c.r.Read(p)
@@ -186,13 +211,7 @@ func listTarGz(r io.Reader, l Limits) ([]File, error) {
 
 const creatorUnix = 3
 
-// zipSpool admits one zip spool at a time, so the temp disk List uses is bounded by
-// one spool however many downloads run at once.
-var zipSpool sync.Mutex //nolint:gochecknoglobals // a process-wide lock is the point
-
 func listZip(r io.Reader, l Limits) (files []File, err error) {
-	zipSpool.Lock()
-	defer zipSpool.Unlock()
 	tmp, err := os.CreateTemp("", "dots-zip-*")
 	if err != nil {
 		return nil, fmt.Errorf("spool zip: %w", err)
@@ -236,52 +255,202 @@ func listZip(r io.Reader, l Limits) (files []File, err error) {
 	return files, nil
 }
 
-// End-of-central-directory record layout (zip 4.3.14 to 4.3.16).
+// Zip record layout (zip 4.3.12 to 4.3.16); archive/zip reads the same fields.
 const (
-	eocdSig        = "PK\x05\x06"
-	eocdLen        = 22
-	eocdMaxComment = 1<<16 - 1
-	zip64LocSig    = "PK\x06\x07"
-	zip64LocLen    = 20
-	zip64EOCDSig   = "PK\x06\x06"
-	zip64EOCDLen   = 56
+	eocdSig         = "PK\x05\x06"
+	eocdLen         = 22
+	zip64LocSig     = "PK\x06\x07"
+	zip64LocLen     = 20
+	zip64EOCDSig    = "PK\x06\x06"
+	zip64EOCDLen    = 56
+	dirHeaderSig    = "PK\x01\x02"
+	dirHeaderLen    = 46
+	zipTailShort    = 1024
+	zipTailLong     = 65 * 1024
+	zip64Marker16   = 0xffff
+	zip64Marker32   = 0xffffffff
+	dirHeaderNameAt = 28 // name, extra and comment lengths: three uint16 from here
 )
 
-// checkCentralDir reads the end-of-central-directory record, and the zip64 one when
-// the first holds the zip64 markers, and refuses a zip whose central directory has
-// too many entries or is too large, before zip.NewReader builds it in memory.
+// directory is where archive/zip will start reading central directory headers.
+type directory struct {
+	start   int64  // first header
+	records uint64 // entries the end record declares
+	size    uint64 // bytes the end record declares
+}
+
+// checkCentralDir bounds the central directory before zip.NewReader builds it in
+// memory. archive/zip trusts neither the declared entry count (it compares it mod
+// 65536) nor the declared size: it reads headers from the directory offset until one is
+// malformed. So this finds the offset exactly as archive/zip does, then walks the
+// headers itself and counts them. Guaranteed: zip.NewReader runs only when the headers
+// it will read, from that offset, number at most MaxEntries and take at most
+// MaxCentralDir bytes (header, name, extra and comment), and the declared entry count
+// and size are within the same caps. Not guaranteed: the walk stops at the first
+// malformed header, as archive/zip does, so entries after it are neither counted nor
+// read.
 func checkCentralDir(ra io.ReaderAt, size int64, l Limits) error {
-	tail := make([]byte, min(size, eocdLen+eocdMaxComment))
-	if _, err := ra.ReadAt(tail, size-int64(len(tail))); err != nil {
+	d, err := locateDirectory(ra, size, l)
+	if err != nil {
+		if errors.Is(err, ErrTooManyEntries) || errors.Is(err, ErrTooLarge) {
+			return err
+		}
 		return fmt.Errorf("read zip: %w", err)
 	}
-	i := bytes.LastIndex(tail, []byte(eocdSig))
-	if i < 0 || len(tail)-i < eocdLen {
-		return fmt.Errorf("read zip: %w", zip.ErrFormat)
-	}
-	entries := uint64(binary.LittleEndian.Uint16(tail[i+10:]))
-	dirSize := uint64(binary.LittleEndian.Uint32(tail[i+12:]))
-	if entries == math.MaxUint16 || dirSize == math.MaxUint32 {
-		loc := i - zip64LocLen
-		if loc < 0 || string(tail[loc:loc+4]) != zip64LocSig {
-			return fmt.Errorf("read zip: %w", zip.ErrFormat)
+	br := bufio.NewReader(io.NewSectionReader(ra, d.start, size-d.start))
+	var entries, total int64
+	for {
+		n, ok := nextHeader(br)
+		if !ok {
+			return nil // archive/zip stops here too and reports what is wrong
 		}
-		off := binary.LittleEndian.Uint64(tail[loc+8:])
-		if off > math.MaxInt64 || int64(off) > size-zip64EOCDLen {
-			return fmt.Errorf("read zip: %w", zip.ErrFormat)
+		entries++
+		total += dirHeaderLen + n
+		if entries > MaxEntries {
+			return ErrTooManyEntries
 		}
-		rec := make([]byte, zip64EOCDLen)
-		if _, err := ra.ReadAt(rec, int64(off)); err != nil || string(rec[:4]) != zip64EOCDSig {
-			return fmt.Errorf("read zip: %w", zip.ErrFormat)
+		if total > l.MaxCentralDir {
+			return ErrTooLarge
 		}
-		entries = binary.LittleEndian.Uint64(rec[32:])
-		dirSize = binary.LittleEndian.Uint64(rec[40:])
 	}
-	if entries > MaxEntries {
-		return ErrTooManyEntries
+}
+
+// nextHeader reads one central directory header and skips its name, extra field and
+// comment. It returns the length of those, or false at the first header that is
+// malformed or cut short.
+func nextHeader(br *bufio.Reader) (int64, bool) {
+	var hdr [dirHeaderLen]byte
+	if _, err := io.ReadFull(br, hdr[:]); err != nil || string(hdr[:4]) != dirHeaderSig {
+		return 0, false
 	}
-	if dirSize > math.MaxInt64 || int64(dirSize) > l.MaxCentralDir {
-		return ErrTooLarge
+	n := varLen(hdr[:])
+	skipped, err := br.Discard(int(n))
+	return n, err == nil && int64(skipped) == n
+}
+
+// locateDirectory replicates archive/zip's readDirectoryEnd: the end record in the last
+// 1 KiB or else the last 65 KiB, the zip64 record when a field holds a marker, and the
+// base offset fallback.
+func locateDirectory(ra io.ReaderAt, size int64, l Limits) (directory, error) {
+	end, buf, err := findEOCD(ra, size)
+	if err != nil {
+		return directory{}, err
 	}
-	return nil
+	d := directory{
+		records: uint64(binary.LittleEndian.Uint16(buf[10:])),
+		size:    uint64(binary.LittleEndian.Uint32(buf[12:])),
+	}
+	offset := uint64(binary.LittleEndian.Uint32(buf[16:]))
+	if d.records == zip64Marker16 || d.size == zip64Marker32 || offset == zip64Marker32 {
+		p, err := zip64End(ra, end)
+		if err != nil {
+			return directory{}, err
+		}
+		if p >= 0 {
+			end = p
+			rec := make([]byte, zip64EOCDLen)
+			if _, err := ra.ReadAt(rec, p); err != nil || string(rec[:4]) != zip64EOCDSig {
+				return directory{}, zip.ErrFormat
+			}
+			d.records = binary.LittleEndian.Uint64(rec[32:])
+			d.size = binary.LittleEndian.Uint64(rec[40:])
+			offset = binary.LittleEndian.Uint64(rec[48:])
+		}
+	}
+	if d.records > MaxEntries {
+		return directory{}, ErrTooManyEntries
+	}
+	if d.size > math.MaxInt64 || int64(d.size) > l.MaxCentralDir {
+		return directory{}, ErrTooLarge
+	}
+	if offset > math.MaxInt64 {
+		return directory{}, zip.ErrFormat
+	}
+	base := end - int64(d.size) - int64(offset)
+	if o := base + int64(offset); o < 0 || o >= size {
+		return directory{}, zip.ErrFormat
+	}
+	if base > 0 && headerAt(ra, int64(offset), size) {
+		base = 0
+	}
+	d.start = base + int64(offset)
+	return d, nil
+}
+
+// findEOCD returns the offset and bytes (from the signature on) of the end record.
+func findEOCD(ra io.ReaderAt, size int64) (int64, []byte, error) {
+	for i, n := range []int64{zipTailShort, zipTailLong} {
+		n = min(n, size)
+		buf := make([]byte, n)
+		if _, err := ra.ReadAt(buf, size-n); err != nil && !errors.Is(err, io.EOF) {
+			return 0, nil, err //nolint:wrapcheck // wrapped by the caller
+		}
+		if p := lastEOCD(buf); p >= 0 {
+			return size - n + int64(p), buf[p:], nil
+		}
+		if i == 1 || n == size {
+			return 0, nil, zip.ErrFormat
+		}
+	}
+	return 0, nil, zip.ErrFormat
+}
+
+// lastEOCD is archive/zip's findSignatureInBlock: the last end record whose comment
+// fits in b, or -1.
+func lastEOCD(b []byte) int {
+	for i := len(b) - eocdLen; i >= 0; i-- {
+		if string(b[i:i+4]) == eocdSig {
+			if int(binary.LittleEndian.Uint16(b[i+eocdLen-2:]))+eocdLen+i > len(b) {
+				return -1
+			}
+			return i
+		}
+	}
+	return -1
+}
+
+// zip64End returns the offset of the zip64 end record, or -1 when the end record at
+// end has no valid zip64 locator before it.
+func zip64End(ra io.ReaderAt, end int64) (int64, error) {
+	loc := end - zip64LocLen
+	if loc < 0 {
+		return -1, nil
+	}
+	buf := make([]byte, zip64LocLen)
+	if _, err := ra.ReadAt(buf, loc); err != nil {
+		return -1, err //nolint:wrapcheck // wrapped by the caller
+	}
+	if string(buf[:4]) != zip64LocSig || binary.LittleEndian.Uint32(buf[4:]) != 0 ||
+		binary.LittleEndian.Uint32(buf[16:]) != 1 {
+		return -1, nil
+	}
+	p := binary.LittleEndian.Uint64(buf[8:])
+	if p > math.MaxInt64 {
+		return -1, zip.ErrFormat
+	}
+	return int64(p), nil
+}
+
+// headerAt reports whether a whole central directory header, name, extra and comment
+// included, can be read at off.
+func headerAt(ra io.ReaderAt, off, size int64) bool {
+	if off >= size {
+		return false
+	}
+	sr := io.NewSectionReader(ra, off, size-off)
+	var hdr [dirHeaderLen]byte
+	if _, err := io.ReadFull(sr, hdr[:]); err != nil || string(hdr[:4]) != dirHeaderSig {
+		return false
+	}
+	n := varLen(hdr[:])
+	_, err := io.CopyN(io.Discard, sr, n)
+	return err == nil
+}
+
+// varLen is the size of the name, extra field and comment that follow a central
+// directory header.
+func varLen(hdr []byte) int64 {
+	return int64(binary.LittleEndian.Uint16(hdr[dirHeaderNameAt:])) +
+		int64(binary.LittleEndian.Uint16(hdr[dirHeaderNameAt+2:])) +
+		int64(binary.LittleEndian.Uint16(hdr[dirHeaderNameAt+4:]))
 }

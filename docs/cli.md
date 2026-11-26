@@ -498,8 +498,9 @@ of the check; an archive that cannot be read counts the same.
 Listing is bounded against hostile archives: entry names over 4096 bytes or more
 than 16 MiB of names in total, more than 100000 entries, or more than 4 GiB of
 decompressed `.tar.gz` data stop the listing. A `.zip` is spooled only up to 256 MiB,
-one zip at a time across the parallel downloads, and is not listed when its central
-directory is over 64 MiB. An archive that hits a limit counts as unchecked; its
+one zip at a time per run (the wait for the slot is not part of a download's timeout), and is not listed when its central
+directory holds more than 100000 entries or is over 64 MiB, counted from the headers the
+reader would actually read (not from the sizes the archive declares). An archive that hits a limit counts as unchecked; its
 checksum still covers the whole download. Zip entry names are kept as stored
 (backslashes stay backslashes), as chezmoi matches them when it applies the external.
 

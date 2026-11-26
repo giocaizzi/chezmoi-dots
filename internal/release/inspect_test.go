@@ -5,12 +5,15 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -210,11 +213,8 @@ func (b *pacedBody) Close() error { return nil }
 
 func TestInspectZipsWithinTheDownloadTimeout(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: waiting for the zip spool does not count against a download's timeout", func(t *testing.T) {
+	t.Run("waiting for the zip slot does not count against a download's timeout", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: archive.listZip takes its process-wide lock while the body is still unread, " +
-			"so the second zip's DownloadTimeout runs out while it waits for the first; Inspect then fails " +
-			"although each download alone takes about 600ms of the 1s timeout")
 		f := Finder{HTTP: &http.Client{Transport: pacedTransport{body: zipOf(t, "tool.exe"), delay: 60 * time.Millisecond}}, DownloadTimeout: time.Second}
 		rel := pkgreg.Release{Name: "tool", Version: "1", URL: "https://example.invalid/{target}", Targets: map[string]string{
 			"windows/amd64": "amd64.zip", "windows/arm64": "arm64.zip",
@@ -223,4 +223,80 @@ func TestInspectZipsWithinTheDownloadTimeout(t *testing.T) {
 			t.Errorf("Inspect = %v, want the two downloads to succeed", err)
 		}
 	})
+}
+
+// countingTransport records how many requests are in flight at once.
+type countingTransport struct {
+	body     []byte
+	mu       sync.Mutex
+	inFlight int
+	peak     int
+}
+
+func (c *countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.mu.Lock()
+	c.inFlight++
+	c.peak = max(c.peak, c.inFlight)
+	c.mu.Unlock()
+	return &http.Response{StatusCode: http.StatusOK, ContentLength: -1, Request: req, Body: &countingBody{
+		c: c, r: &pacedBody{req: req, rest: c.body, chunk: len(c.body)/4 + 1, delay: 20 * time.Millisecond},
+	}}, nil
+}
+
+type countingBody struct {
+	c    *countingTransport
+	r    *pacedBody
+	once sync.Once
+}
+
+func (b *countingBody) Read(p []byte) (int, error) { return b.r.Read(p) }
+
+func (b *countingBody) Close() error {
+	b.once.Do(func() {
+		b.c.mu.Lock()
+		b.c.inFlight--
+		b.c.mu.Unlock()
+	})
+	return nil
+}
+
+func TestInspectDownloadsOneZipAtATime(t *testing.T) {
+	t.Parallel()
+	ct := &countingTransport{body: zipOf(t, "tool.exe")}
+	f := Finder{HTTP: &http.Client{Transport: ct}}
+	rel := pkgreg.Release{Name: "tool", Version: "1", URL: "https://example.invalid/{target}", Targets: map[string]string{
+		"windows/amd64": "amd64.zip", "windows/arm64": "arm64.zip", "windows/386": "386.zip",
+	}}
+	_, files, err := f.Inspect(t.Context(), rel, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 3 || files["windows/386"] == nil {
+		t.Errorf("files = %v, want all three zips listed", files)
+	}
+	if ct.peak != 1 {
+		t.Errorf("zip downloads in flight at once = %d, want 1", ct.peak)
+	}
+}
+
+func TestInspectZipWaitStopsOnCancel(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	// The first zip never ends; the second waits for the slot until ctx is cancelled.
+	f := Finder{HTTP: &http.Client{Transport: pacedTransport{body: zipOf(t, "tool.exe"), delay: time.Hour}}}
+	rel := pkgreg.Release{Name: "tool", Version: "1", URL: "https://example.invalid/{target}", Targets: map[string]string{
+		"windows/amd64": "amd64.zip", "windows/arm64": "arm64.zip",
+	}}
+	time.AfterFunc(50*time.Millisecond, cancel)
+	done := make(chan error, 1)
+	go func() { _, _, err := f.Inspect(ctx, rel, "1"); done <- err }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("Inspect = %v, want %v", err, context.Canceled)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Inspect did not return after cancel")
+	}
 }
