@@ -95,6 +95,9 @@ func TestExecRunOK(t *testing.T) {
 		t.Fatalf("runner calls = %d, want 1", len(r.runner.calls))
 	}
 	c := r.runner.calls[0]
+	if !c.Group {
+		t.Error("the child is not in its own process group")
+	}
 	if diff := cmp.Diff(append([]string{"/fake/bws"}, args...), c.Args); diff != "" {
 		t.Errorf("argv (-want +got):\n%s", diff)
 	}
@@ -194,6 +197,18 @@ func TestExecRunChildFailure(t *testing.T) {
 		var ec interface{ ExitCode() int }
 		if err == nil || errors.As(err, &ec) {
 			t.Errorf("error = %v, want a plain error without an exit code", err)
+		}
+	})
+	t.Run("cancelled parent is no exit code", func(t *testing.T) {
+		t.Parallel()
+		r := newRig("bws")
+		r.runner.err = exitCodedError{code: 2, msg: "interrupted"}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		err := r.exec.Run(ctx, registry("bws", nil), "example-vault", nil, 0)
+		var ec interface{ ExitCode() int }
+		if err == nil || errors.As(err, &ec) || !errors.Is(err, context.Canceled) {
+			t.Errorf("error = %v, want a plain error wrapping context.Canceled", err)
 		}
 	})
 	t.Run("token redacted", func(t *testing.T) {

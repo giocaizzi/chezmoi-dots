@@ -187,7 +187,7 @@ func (p Prober) run(ctx context.Context, argv, env []string, keepStdout bool) ca
 	cctx, cancel := context.WithTimeout(ctx, p.timeout())
 	defer cancel()
 	var stdout, stderr bytes.Buffer
-	c := chez.Cmd{Args: argv, Env: env, Stderr: &stderr}
+	c := chez.Cmd{Args: argv, Env: env, Stderr: &stderr, Group: true}
 	if keepStdout {
 		c.Stdout = &stdout
 	}
