@@ -42,6 +42,8 @@ func newFlags(name string) *flag.FlagSet {
 		fs.String("github", "", "add a release from the latest GitHub release of `owner/repo`")
 		fs.Bool("yes", false, "accept the detected sources or the GitHub proposal without asking")
 		fs.Bool("dry-run", false, "print the entry, write nothing and download no archive")
+	case cmdSecretsRun:
+		fs.Duration("timeout", 0, "stop the CLI after this `duration` (0 means no timeout)")
 	case cmdUpgrade:
 		fs.Bool("dry-run", false, "show upgrade commands without executing upgrade steps")
 	case cmdLive:

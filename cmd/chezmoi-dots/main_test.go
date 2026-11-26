@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -93,5 +95,17 @@ func TestRunCancellation(t *testing.T) {
 	var out, errw bytes.Buffer
 	if code := run(ctx, []string{"list"}, testGetenv, strings.NewReader(""), &out, &errw); code != 130 {
 		t.Errorf("exit = %d, want 130", code)
+	}
+}
+
+func TestExitCodeError(t *testing.T) {
+	t.Parallel()
+	var errw bytes.Buffer
+	err := fmt.Errorf("wrapped: %w", &cli.ExitCodeError{Code: 7})
+	if code := exitCode(t.Context(), err, &errw); code != 7 || errw.Len() != 0 {
+		t.Errorf("exit = %d, stderr %q; want 7 and nothing printed", code, errw.String())
+	}
+	if code := exitCode(t.Context(), errors.New("boom"), &errw); code != 1 || !strings.Contains(errw.String(), "boom") {
+		t.Errorf("exit = %d, stderr %q; want 1 and the error", code, errw.String())
 	}
 }
