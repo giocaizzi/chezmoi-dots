@@ -61,17 +61,22 @@ func ProposePath(names []string, p Proposal, files map[string][]archive.File) (f
 		}
 		templated[templatePath(matches[0], p, p.Targets[k], windows)] = true
 	}
-	if len(candidates) == 0 || !exactlyOne || len(templated) != 1 {
-		return "", false, candidates
+	found, ok = settled(templated, exactlyOne)
+	return found, ok, candidates
+}
+
+// settled returns the one templated path every listed target agrees on; an OS or
+// arch left in it would be wrong for every other target, so it settles nothing.
+func settled(templated map[string]bool, exactlyOne bool) (string, bool) {
+	if !exactlyOne || len(templated) != 1 {
+		return "", false
 	}
 	for t := range templated {
-		if platformSpecific(t) {
-			// An OS or arch left in the path would be wrong for every other target.
-			return "", false, candidates
+		if !platformSpecific(t) {
+			return t, true
 		}
-		return t, true, candidates
 	}
-	return "", false, candidates
+	return "", false
 }
 
 // platformSpecific reports whether a templated path still names an OS or an arch,
