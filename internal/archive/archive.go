@@ -275,6 +275,7 @@ const (
 // directory is where archive/zip will start reading central directory headers.
 type directory struct {
 	start   int64  // first header
+	other   int64  // the other start archive/zip may use (base offset kept); -1 if none
 	records uint64 // entries the end record declares
 	size    uint64 // bytes the end record declares
 }
@@ -284,7 +285,8 @@ type directory struct {
 // 65536) nor the declared size: it reads headers from the directory offset until one is
 // malformed. So this finds the offset exactly as archive/zip does, then walks the
 // headers itself and counts them. Guaranteed: zip.NewReader runs only when the headers
-// it will read, from that offset, number at most MaxEntries and take at most
+// it will read, from that offset (from both candidate offsets when archive/zip may
+// drop the base offset), number at most MaxEntries and take at most
 // MaxCentralDir bytes (header, name, extra and comment), and the declared entry count
 // and size are within the same caps. Not guaranteed: the walk stops at the first
 // malformed header, as archive/zip does, so entries after it are neither counted nor
@@ -297,7 +299,19 @@ func checkCentralDir(ra io.ReaderAt, size int64, l Limits) error {
 		}
 		return fmt.Errorf("read zip: %w", err)
 	}
-	br := bufio.NewReader(io.NewSectionReader(ra, d.start, size-d.start))
+	if err := walkDir(ra, d.start, size, l); err != nil {
+		return err
+	}
+	if d.other >= 0 {
+		return walkDir(ra, d.other, size, l)
+	}
+	return nil
+}
+
+// walkDir counts the central directory headers from start until a malformed one, and
+// fails as soon as they exceed MaxEntries or MaxCentralDir bytes.
+func walkDir(ra io.ReaderAt, start, size int64, l Limits) error {
+	br := bufio.NewReader(io.NewSectionReader(ra, start, size-start))
 	var entries, total int64
 	for {
 		n, ok := nextHeader(br)
@@ -370,10 +384,12 @@ func locateDirectory(ra io.ReaderAt, size int64, l Limits) (directory, error) {
 	if o := base + int64(offset); o < 0 || o >= size {
 		return directory{}, zip.ErrFormat
 	}
+	d.start, d.other = base+int64(offset), -1
 	if base > 0 && headerAt(ra, int64(offset), size) {
-		base = 0
+		// archive/zip drops the base when it can read a header at the declared offset,
+		// with checks (zip64 extra fields) headerAt does not repeat: walk both starts.
+		d.start, d.other = int64(offset), base+int64(offset)
 	}
-	d.start = base + int64(offset)
 	return d, nil
 }
 

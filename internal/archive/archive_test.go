@@ -492,10 +492,6 @@ func TestListZipCountsTheHeadersTheReaderReads(t *testing.T) {
 		{name: "a directory after a self-extractor prefix", data: rawZip([]byte("SFXSTUB!"), over, 0, over*46)},
 		{
 			name: "a header only this package accepts at the declared offset",
-			xfail: "locateDirectory switches to base offset 0 when headerAt accepts the header at the declared " +
-				"offset, but headerAt skips the zip64 extra checks of archive/zip's readDirectoryHeader, so the walk " +
-				"counts from offset 0 while zip.NewReader reads the 100001 headers after the prefix " +
-				"(378 MiB allocated for 1.46M headers in a 64 MiB directory)",
 			data: rawZip(slices.Concat(short64, []byte("junk")), over, 0, over*46),
 		},
 	}
