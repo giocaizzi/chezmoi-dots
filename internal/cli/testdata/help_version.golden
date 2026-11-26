@@ -1,0 +1,16 @@
+chezmoi dots version — Print version information
+
+USAGE
+  chezmoi dots version
+
+ARGUMENTS
+  None required. Extra positional arguments are ignored.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+
+ENVIRONMENT
+  None.
+
+EXAMPLES
+  chezmoi dots version

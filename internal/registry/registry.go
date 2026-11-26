@@ -151,7 +151,8 @@ func parseCheck(c any, bad func(string, ...any)) []string {
 }
 
 // Validate checks the registry against the source tree: every source exists, and
-// every .chezmoidata file and every encrypted file has an entry.
+// every .chezmoidata file except the registry file itself, and every encrypted file,
+// has an entry.
 func (r Registry) Validate(src fs.FS) []finding.Finding {
 	var out []finding.Finding
 	covered := map[string]bool{}
@@ -168,6 +169,9 @@ func (r Registry) Validate(src fs.FS) []finding.Finding {
 	_ = fs.WalkDir(src, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil //nolint:nilerr // an unreadable entry is not a registry problem
+		}
+		if p == ".chezmoidata/edit.toml" {
+			return nil // the registry file needs no entry for itself
 		}
 		if (strings.HasPrefix(p, ".chezmoidata/") || path.Ext(p) == ".age") && !covered[p] {
 			out = append(out, finding.New(p, "no edit registry entry"))

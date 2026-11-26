@@ -44,7 +44,7 @@ kind = "rbw"
 
 ## Lint
 
-`chezmoi dots lint secrets` runs on the isolated (OS/role independent) data,
+`chezmoi dots lint secrets` runs on the isolated (OS/profile independent) data,
 like `packages`. Findings are reported as `secret <name>: <message>`:
 
 - `secret` absent or not a table: no findings. Entries that are not tables, or tables without `kind`, are ignored and listed in the note `secrets: ignored data.secret entries without a kind: <names>` (not a failure).
@@ -93,11 +93,11 @@ under the table.
 ### Sample output
 
 ```text
-NAME             KIND  STATE  DETAIL
-ci-project       bws   ok     project 00000000-0000-0000-0000-000000000000 reachable
-example-vault    bws   ok     not configured (answer secretsProjectId is empty)
-passwords        bw    warn   vault locked
-rbw              rbw   fail   rbw not found
+  NAME           KIND  STATE  DETAIL
+  ci-project     bws   ok     project 00000000-0000-0000-0000-000000000000 reachable
+  example-vault  bws   ok     not configured (answer secretsProjectId is empty)
+  passwords      bw    warn   vault locked
+  rbw            rbw   fail   rbw not found
   passwords: bw unlock, then export BW_SESSION
   rbw: install rbw or set command in .chezmoidata/secrets.toml
 ```

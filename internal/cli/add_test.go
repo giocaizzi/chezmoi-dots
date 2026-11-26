@@ -85,6 +85,25 @@ func TestAddUnmanagedFile(t *testing.T) {
 	}
 }
 
+// The registry file needs no entry for itself: the first add on a source whose edit.toml
+// has none succeeds.
+func TestAddFirstEntryNeedsNoRegistryEntry(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.isolate(t)
+	reg := filepath.Join(e.src, ".chezmoidata", "edit.toml")
+	e.file(t, filepath.Join(e.src, ".chezmoidata"), "edit.toml", "[edit.note]\ndesc = \"A note\"\nsource = \"dot_note.tmpl\"\n")
+	target := e.file(t, e.dest, ".first-extra", "x\n")
+
+	if _, stderr, err := e.run(t, "", "add", target, "--desc", "First"); err != nil {
+		t.Fatalf("first add = %v\n%s", err, stderr)
+	}
+	b, err := os.ReadFile(reg)
+	if err != nil || !strings.Contains(string(b), "[edit.first-extra]") || strings.Contains(string(b), `source = ".chezmoidata/edit.toml"`) {
+		t.Errorf("registry = %q, %v", b, err)
+	}
+}
+
 func TestAddTemplate(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -420,5 +439,32 @@ func TestAddRestoresRegistryWhenChezmoiAddFails(t *testing.T) {
 				t.Errorf("registry created by add was not removed:\n%s", b)
 			}
 		})
+	}
+}
+
+func TestAddWithoutDescOffATerminalIsAUsageError(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.isolate(t)
+	target := e.file(t, e.dest, ".nodesc", "x\n")
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = null.Close() })
+	var out, errw bytes.Buffer
+	d := cli.Deps{
+		Getenv: func(k string) string { return e.vars[k] },
+		Stdin:  null, Stdout: &out, Stderr: &errw,
+		Runner: sandboxRunner{sandboxEnv(e.sandbox)}, LookPath: exec.LookPath,
+		GOOS: runtime.GOOS, Home: e.vars["HOME"], Version: "test",
+	}
+	err = cli.Run(t.Context(), d, []string{"add", target})
+	const want = "--desc is required when stdin is not a terminal"
+	if !errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), want) {
+		t.Errorf("add = %v, want a usage error containing %q", err, want)
+	}
+	if strings.Contains(errw.String(), "Description for") {
+		t.Errorf("a prompt was written:\n%s", errw.String())
 	}
 }

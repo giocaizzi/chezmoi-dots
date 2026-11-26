@@ -1,0 +1,22 @@
+chezmoi dots upgrade — Run system and dotfile upgrade steps
+
+USAGE
+  chezmoi dots upgrade [<step>...] [options]
+
+ARGUMENTS
+  step  dotfiles, brew, apt, winget, uv, npm, psmodules (OS-specific).
+  Default: all steps for this OS. Steps are arguments, not subcommands; execution follows the built-in plan order.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+  --dry-run  show upgrade commands without executing upgrade steps (default: "false")
+
+ENVIRONMENT
+  CHEZMOI_EXECUTABLE  chezmoi executable (default: chezmoi).
+  CHEZMOI_CONFIG_FILE  chezmoi config file (default: chezmoi's config).
+  CHEZMOI_SOURCE_DIR  source directory (default: ask chezmoi; honors .chezmoiroot).
+  PATH  determines available package managers.
+
+EXAMPLES
+  chezmoi dots upgrade --dry-run
+  chezmoi dots upgrade dotfiles uv

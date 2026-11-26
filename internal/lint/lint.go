@@ -94,7 +94,7 @@ func (l Linter) secrets(ctx context.Context) ([]finding.Finding, error) {
 		return nil, err
 	}
 	if ignored := vaultcheck.Ignored(data); len(ignored) > 0 && l.Errw != nil {
-		fmt.Fprintf(l.Errw, "  note: secrets: ignored data.secret entries without a kind: %s (see docs/secrets.md)\n", strings.Join(ignored, ", "))
+		fmt.Fprintf(l.Errw, "  note: secrets: ignored data.secret entries without a kind: %s (see chezmoi dots help lint)\n", strings.Join(ignored, ", "))
 	}
 	return vaultcheck.Validate(data), nil
 }

@@ -7,13 +7,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+
+	xterm "golang.org/x/term"
 
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
 	"github.com/giocaizzi/chezmoi-dots/internal/detect"
@@ -257,8 +258,7 @@ func (d Deps) interactive() bool {
 	if !ok {
 		return false
 	}
-	info, err := f.Stat()
-	return err == nil && info.Mode()&fs.ModeCharDevice != 0
+	return xterm.IsTerminal(int(f.Fd()))
 }
 
 // prompter asks questions on stderr and reads the answers from stdin.

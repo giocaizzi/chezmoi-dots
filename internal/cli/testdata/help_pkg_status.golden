@@ -1,0 +1,26 @@
+chezmoi dots pkg status — Every tool: installed, pinned and latest versions
+
+USAGE
+  chezmoi dots pkg status [options]
+
+ARGUMENTS
+  None. Default: inspect installed tools and look up latest versions without fetching git.
+  Pinned archive externals are compared with their repository HEAD.
+  --offline skips upstream lookups and the git fetch; brew and apt still report latest from their local index, and version commands or winget export may still reach the network.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+  --check  exit non-zero for outdated, drifted or missing tools (default: "false")
+  --fetch  git fetch the dotfiles first (default: "false")
+  --offline  skip upstream lookups (releases, uv, npm) and the git fetch (default: "false")
+
+ENVIRONMENT
+  CHEZMOI_EXECUTABLE  chezmoi executable (default: chezmoi).
+  CHEZMOI_CONFIG_FILE  chezmoi config file (default: chezmoi's config).
+  CHEZMOI_SOURCE_DIR  source directory (default: ask chezmoi; honors .chezmoiroot).
+  CHEZMOI_WORKING_TREE  dotfiles working tree (default: ask chezmoi).
+
+EXAMPLES
+  chezmoi dots pkg status
+  chezmoi dots pkg status --offline
+  chezmoi dots pkg status --fetch --check

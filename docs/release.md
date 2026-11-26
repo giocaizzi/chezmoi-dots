@@ -129,4 +129,4 @@ A bad release is replaced, not edited:
 
    Deleting it does not change dotfiles repositories that already bumped: they keep the pinned version and checksum, and `chezmoi apply` fails to download until they pin another version. Never reuse the version number; publish a new one.
 
-**Last verified:** 2026-11-26 by Claude: the workflow description is read from `release.yml`; the asset names, checksum and attestation checks were run against the v0.3.0 release. The tag and release steps have not been run end to end for a new version.
+**Last verified:** 2026-11-26 by Claude: the build step of `release.yml` was run locally for 0.4.0 (five assets named as above, `checksums.txt` verifies, the darwin/arm64 binary prints `chezmoi-dots 0.4.0`); the asset names, checksum and attestation checks were run against the v0.3.0 release. The tag and release steps have not been run end to end for a new version.

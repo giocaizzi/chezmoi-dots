@@ -103,7 +103,7 @@ go install github.com/giocaizzi/chezmoi-dots/cmd/chezmoi-dots@latest
 Use `dots <command> --help` for command-specific options. See the full
 [command reference](docs/cli.md) for defaults, environment, parsing and exit
 semantics, including the internal `live` command. The day-to-day procedures are
-in the [everyday workflow](docs/workflow.md) runbook, and the format of `.chezmoidata/packages.toml` that `pkg` and `lint packages` read is in the [package registry](docs/registry.md) reference. For source builds, see
+in the [everyday workflow](docs/workflow.md) runbook, and the format of `.chezmoidata/packages.toml` that `pkg` and `lint packages` read is in the [package registry](docs/registry.md) reference. The [edit registry](docs/edit-registry.md) documents the `.chezmoidata/edit.toml` that `edit` and `add` use, and the [alias registry](docs/alias-registry.md) the alias data that `lint aliases` and `audit aliases` read. For source builds, see
 [Build and install locally](docs/local-build-install.md); maintainers publish versions with the [release runbook](docs/release.md).
 
 See [Apply and publish source edits](docs/README.md#apply-and-publish-source-edits) for the chezmoi settings that control apply and Git automation.

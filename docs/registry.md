@@ -13,7 +13,7 @@ One table per package: `[package.<name>]`.
 brew = "example-lint"
 apt = "example-lint"
 winget = "Octocat.ExampleLint"
-roles = ["personal", "work"]
+roles = ["home"]
 ```
 
 | Key | Type | Meaning | Read by |
@@ -58,7 +58,7 @@ url = "https://github.com/octocat/example-tool/releases/download/v{version}/exam
 type = "archive-file"
 path = "example-tool"
 exe = true
-roles = ["personal", "work"]
+roles = ["home"]
 
 [release.example-tool.target]
 "darwin/arm64" = "darwin_arm64"
@@ -133,7 +133,7 @@ A registry with two packages and one release, and the templates that read it. Ev
 brew = "example-lint"
 apt = "example-lint"
 winget = "Octocat.ExampleLint"
-roles = ["personal", "work"]
+roles = ["home"]
 
 # Only where the answer `gui` is true in chezmoi's [data].
 [package.example-viewer]
@@ -147,7 +147,7 @@ url = "https://github.com/octocat/example-tool/releases/download/v{version}/exam
 type = "archive-file"
 path = "example-tool"
 exe = true
-roles = ["personal", "work"]
+roles = ["home"]
 
 [release.example-tool.target]
 "darwin/amd64" = "darwin_amd64"
@@ -164,10 +164,10 @@ roles = ["personal", "work"]
 "windows/amd64" = "5555555555555555555555555555555555555555555555555555555555555555"
 ```
 
-`.chezmoitemplates/role`: the role comes from `[data]` answers (`light = true`, `work = true`), personal otherwise.
+`.chezmoitemplates/role`: the role comes from the `[data]` answer `minimal = true`, `home` otherwise.
 
 ```text
-{{- if get . "light" -}}light{{- else if get . "work" -}}work{{- else -}}personal{{- end -}}
+{{- if get . "minimal" -}}minimal{{- else -}}home{{- end -}}
 ```
 
 `.chezmoitemplates/releases`: the releases for this role, answers and OS/arch, with their destination.
@@ -210,9 +210,10 @@ roles = ["personal", "work"]
 {{- $out | toJson -}}
 ```
 
-`.chezmoiexternal.toml.tmpl`: installs the releases the `releases` template selected, so the filter lives in one place.
+`.chezmoiexternal.toml.tmpl`: installs the releases the `releases` template selected, so the filter lives in one place. The `dotsRender` gate keeps `lint templates`, `view` and edit previews (which set `dotsRender = true`, see [matrix](matrix.md)) from downloading every release for every configuration; a normal `chezmoi apply` is unaffected.
 
 ```text
+{{- if not (get . "dotsRender") -}}
 {{- $plat := printf "%s/%s" .chezmoi.os .chezmoi.arch -}}
 {{- range $name, $sel := includeTemplate "releases" . | fromJson -}}
 {{-   $r := index $.release $name -}}
@@ -230,6 +231,7 @@ roles = ["personal", "work"]
 {{- end }}
     checksum.sha256 = {{ index $r.sha256 $plat | quote }}
 {{ end -}}
+{{- end -}}
 ```
 
 On macOS arm64 with `gui = true` in the `[data]` of the chezmoi config, rendering the externals template gives:
@@ -243,6 +245,6 @@ On macOS arm64 with `gui = true` in the `[data]` of the chezmoi config, renderin
     checksum.sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
 ```
 
-and `chezmoi dots pkg status --offline` lists `example-tool` under pinned releases, `example-lint` and `example-viewer` under Homebrew. With `light = true` and no `gui` answer (or `gui = false`), nothing is selected: the release and `example-lint` are for `personal` and `work`, and the viewer needs `gui`. With `light = true` and `gui = true`, only `example-viewer` is selected, since it sets no `roles`. `chezmoi dots lint packages` passes, and `chezmoi dots pkg add example-cli --brew --dry-run` prints `[package.example-cli]` with `brew = "example-cli"`.
+and `chezmoi dots pkg status --offline` lists `example-tool` under pinned releases, `example-lint` and `example-viewer` under Homebrew. With `minimal = true` and no `gui` answer (or `gui = false`), nothing is selected: the release and `example-lint` are for `home`, and the viewer needs `gui`. With `minimal = true` and `gui = true`, only `example-viewer` is selected, since it sets no `roles`. `chezmoi dots lint packages` passes, and `chezmoi dots pkg add example-cli --brew --dry-run` prints `[package.example-cli]` with `brew = "example-cli"`.
 
 To try a registry without touching your machine, point `HOME`, the `XDG_*` variables, `CHEZMOI_SOURCE_DIR` and `CHEZMOI_CONFIG_FILE` at a scratch directory, and give plain `chezmoi` the matching `--source`, `--config` and `--destination` flags.

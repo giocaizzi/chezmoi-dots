@@ -1,0 +1,22 @@
+chezmoi dots pkg bump — Update pinned versions and checksums in the source
+
+USAGE
+  chezmoi dots pkg bump [<pin>...] [options]
+
+ARGUMENTS
+  pin  Release name or archive repository path (owner/repo) (default: all pins).
+  Default: write updated pins and checksums to .chezmoidata/packages.toml and the externals files.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+  --dry-run  show what would change, write nothing (default: "false")
+
+ENVIRONMENT
+  CHEZMOI_EXECUTABLE  chezmoi executable (default: chezmoi).
+  CHEZMOI_CONFIG_FILE  chezmoi config file (default: chezmoi's config).
+  CHEZMOI_SOURCE_DIR  source directory (default: ask chezmoi; honors .chezmoiroot).
+
+EXAMPLES
+  chezmoi dots pkg bump --dry-run
+  chezmoi dots pkg bump example-tool
+  chezmoi dots pkg bump octocat/example

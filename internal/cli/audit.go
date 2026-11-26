@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +67,7 @@ func (d Deps) auditSecrets(ctx context.Context) error {
 	}
 	if ignored := vaultcheck.Ignored(data); len(ignored) > 0 {
 		defer func() {
-			fmt.Fprintf(d.Stdout, "secrets: ignored data.secret entries without a kind: %s (see docs/secrets.md)\n", strings.Join(ignored, ", "))
+			fmt.Fprintf(d.Stdout, "secrets: ignored data.secret entries without a kind: %s (see chezmoi dots help audit)\n", strings.Join(ignored, ", "))
 		}()
 	}
 	if len(results) == 0 {
@@ -97,12 +98,15 @@ func (d Deps) auditSecrets(ctx context.Context) error {
 // registry does not account for.
 func (d Deps) auditAliases(ctx context.Context) error {
 	known, err := d.knownAliases()
+	if errors.Is(err, errNoRenderedAliases) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
 	shells := []struct{ name, script string }{
 		{"zsh", "print -l ${(k)aliases}"},
-		{"bash", "compgen -a"},
+		{"bash", "compgen -a || true"},
 	}
 	failed := false
 	for _, sh := range shells {
@@ -130,6 +134,10 @@ func (d Deps) auditAliases(ctx context.Context) error {
 	return nil
 }
 
+// errNoRenderedAliases reports that there is no rendered alias file and the check was
+// skipped; knownAliases has already said so on stdout.
+var errNoRenderedAliases = errors.New("no rendered alias file")
+
 // knownAliases reads the rendered alias files and the Oh My Zsh plugins they turn on.
 func (d Deps) knownAliases() (map[string]bool, error) {
 	cfg := d.Getenv("XDG_CONFIG_HOME")
@@ -137,12 +145,25 @@ func (d Deps) knownAliases() (map[string]bool, error) {
 		cfg = filepath.Join(d.Home, ".config")
 	}
 	shellDir := filepath.Join(cfg, "shell")
-	rendered, err := os.ReadFile(filepath.Join(shellDir, "aliases.sh")) //nolint:gosec // the rendered alias file in the user's config dir
+	aliasFile := filepath.Join(shellDir, "aliases.sh")
+	rendered, err := os.ReadFile(aliasFile) //nolint:gosec // the rendered alias file in the user's config dir
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(d.Stdout, "aliases: skipped, no rendered alias file %s (see chezmoi dots help audit)\n", aliasFile)
+		return nil, errNoRenderedAliases
+	}
 	if err != nil {
-		return nil, fmt.Errorf("read the rendered aliases (chezmoi apply?): %w", err)
+		return nil, fmt.Errorf("read the rendered aliases: %w", err)
 	}
 	var plugin []string
-	if omz, err := os.ReadFile(filepath.Join(shellDir, "omz-aliases.zsh")); err == nil { //nolint:gosec // as above
+	omzFile := filepath.Join(shellDir, "omz-aliases.zsh")
+	omz, err := os.ReadFile(omzFile) //nolint:gosec // as above
+	if err != nil {
+		reason := "missing"
+		if !errors.Is(err, fs.ErrNotExist) {
+			reason = err.Error()
+		}
+		fmt.Fprintf(d.Stdout, "aliases: note: %s not read (%s); Oh My Zsh plugin aliases not included\n", omzFile, reason)
+	} else {
 		for _, p := range audit.Plugins(string(omz)) {
 			files, _ := filepath.Glob(filepath.Join(d.Home, ".oh-my-zsh", "plugins", p, "*.zsh"))
 			for _, f := range files {

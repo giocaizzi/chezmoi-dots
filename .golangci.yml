@@ -1,5 +1,5 @@
 # golangci-lint v2 baseline: every linter on, then opt out with a reason.
-# Copy to the repo root as .golangci.yml. Pinned through golangci-lint.mod (see PROJECT_SETUP.md),
+# Pinned through golangci-lint.mod (run as `go tool -modfile=golangci-lint.mod golangci-lint`, see the Makefile),
 # so a golangci-lint upgrade that adds linters lands in its own PR.
 version: "2"
 

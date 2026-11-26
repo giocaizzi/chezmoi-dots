@@ -68,11 +68,12 @@ func TestParseFindings(t *testing.T) {
 func TestValidate(t *testing.T) {
 	t.Parallel()
 	src := fstest.MapFS{
-		"a.md":                {},
-		".chezmoidata/x.toml": {},
-		".chezmoidata/y.toml": {},
-		"dir/secret.age":      {},
-		"dir/other.age":       {},
+		"a.md":                   {},
+		".chezmoidata/x.toml":    {},
+		".chezmoidata/y.toml":    {},
+		".chezmoidata/edit.toml": {},
+		"dir/secret.age":         {},
+		"dir/other.age":          {},
 	}
 	reg, _ := Parse(data(map[string]any{
 		"a":    map[string]any{"desc": "d", "source": "a.md"},
