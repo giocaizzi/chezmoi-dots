@@ -4,6 +4,7 @@ package vaultcheck
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -70,8 +71,12 @@ func validateEntry(n string, e map[string]any) []finding.Finding {
 			bad("unknown key %s", k)
 		}
 	}
-	if c, ok := e["command"]; ok && !nonEmptyString(c) {
-		bad("command must be a non-empty string")
+	if c, ok := e["command"]; ok {
+		if !nonEmptyString(c) {
+			bad("command must be a non-empty string")
+		} else if !validCommand(c.(string)) { //nolint:forcetypeassert // nonEmptyString checked it
+			bad("command must be an absolute path, ~/..., or a bare name looked up on PATH")
+		}
 	}
 	kind, hasKind := e["kind"]
 	if !hasKind {
@@ -155,6 +160,18 @@ func Parse(data map[string]any) ([]Entry, []finding.Finding) {
 	}
 	return out, nil
 }
+
+// validCommand reports whether c cannot resolve against the working directory: a bare
+// name (looked up on PATH), ~/..., an absolute path or a Windows volume path. The
+// volume form is accepted on every OS so a registry lints the same everywhere.
+func validCommand(c string) bool {
+	if !strings.ContainsAny(c, `/\`) || strings.HasPrefix(c, "~/") || filepath.IsAbs(c) {
+		return true
+	}
+	return len(c) >= 3 && isLetter(c[0]) && c[1] == ':' && (c[2] == '/' || c[2] == '\\')
+}
+
+func isLetter(b byte) bool { return 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' }
 
 func nonEmptyString(v any) bool {
 	s, ok := v.(string)

@@ -112,6 +112,9 @@ func (p Prober) Check(ctx context.Context, e Entry, data map[string]any) Result 
 		project = s
 	}
 	bin, name, err := resolveCLI(e, p.Home, p.LookPath)
+	if ce, ok := errors.AsType[*commandError](err); ok {
+		return r.with(Fail, ce.msg, "set command in .chezmoidata/secrets.toml to an absolute path, ~/..., or a bare name")
+	}
 	if err != nil {
 		return r.with(Fail, name+" not found", "install "+e.Kind+" or set command in .chezmoidata/secrets.toml")
 	}
@@ -129,14 +132,24 @@ func (p Prober) Check(ctx context.Context, e Entry, data map[string]any) Result 
 // directory) or else the kind's name, looked up on PATH. name is what was looked up.
 func resolveCLI(e Entry, home string, lookPath func(string) (string, error)) (bin, name string, err error) {
 	name = e.Command
-	if name == "" {
+	switch {
+	case name == "":
 		name = e.Kind
-	} else if rest, ok := strings.CutPrefix(name, "~/"); ok {
-		name = filepath.Join(home, rest)
+	case !validCommand(name):
+		return "", name, &commandError{"command " + name + " is not an absolute path"}
+	default:
+		if rest, ok := strings.CutPrefix(name, "~/"); ok {
+			name = filepath.Join(home, rest)
+		}
 	}
 	bin, err = lookPath(name)
 	return bin, name, err
 }
+
+// commandError is a refusal to look up the declared command: its message is safe to show.
+type commandError struct{ msg string }
+
+func (e *commandError) Error() string { return e.msg }
 
 func (r Result) with(s State, detail, hint string) Result {
 	r.State, r.Detail, r.Hint = s, detail, hint

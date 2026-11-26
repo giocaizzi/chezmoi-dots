@@ -72,18 +72,32 @@ func TestValidate(t *testing.T) {
 
 // A relative command with a path separator resolves against the working directory of
 // whoever runs chezmoi, so a planted bin/bws there would receive the token.
-func TestValidateRelativeCommand(t *testing.T) {
+func TestValidateCommand(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: a relative command path is not flagged", func(t *testing.T) {
-		t.Parallel()
-		t.Skip("xfail: pending fix: Validate accepts a command that resolves against the cwd")
-		for _, cmd := range []string{"bin/bws", "./bws", "../tools/bws"} {
-			data := m{"secret": m{"a": m{"kind": "bw", "command": cmd}}}
-			if got := vaultcheck.Validate(data); len(got) == 0 {
-				t.Errorf("Validate(command %q) = no findings, want one (absolute path, ~/path or a bare name on PATH)", cmd)
+	const msg = "secret a: command must be an absolute path, ~/..., or a bare name looked up on PATH"
+	tests := []struct {
+		command string
+		bad     bool
+	}{
+		{"bin/bws", true}, {"./bws", true}, {"../tools/bws", true}, {`bin\bws`, true}, {`.\bws`, true},
+		{"bws", false}, {"~/bin/bws", false}, {"/usr/bin/bws", false}, {"C:/tools/bws.exe", false}, {`c:\tools\bws.exe`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			t.Parallel()
+			var got []string
+			for _, f := range vaultcheck.Validate(m{"secret": m{"a": m{"kind": "bw", "command": tt.command}}}) {
+				got = append(got, f.String())
 			}
-		}
-	})
+			var want []string
+			if tt.bad {
+				want = []string{msg}
+			}
+			if diff := cmp.Diff(want, got); diff != "" {
+				t.Errorf("Validate() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
 }
 
 func TestParse(t *testing.T) {

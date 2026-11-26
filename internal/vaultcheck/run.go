@@ -61,6 +61,9 @@ func (x Exec) Run(ctx context.Context, data map[string]any, name string, args []
 		return fmt.Errorf("%w: kind %s has no token injection; use the CLI's own session", ErrNoInjection, e.Kind)
 	}
 	bin, cli, err := resolveCLI(e, x.Home, x.LookPath)
+	if ce, ok := errors.AsType[*commandError](err); ok {
+		return ce
+	}
 	if err != nil {
 		return fmt.Errorf("%s not found: install %s or set command in .chezmoidata/secrets.toml", cli, e.Kind)
 	}

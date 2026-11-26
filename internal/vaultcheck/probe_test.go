@@ -164,6 +164,13 @@ func TestCheck(t *testing.T) {
 			argv: []string{"/fake/" + filepath.Join("/home/octocat", "bin", "rbw"), "unlocked"},
 		},
 		{
+			name: "relative command", entry: vaultcheck.Entry{Name: "x", Kind: "rbw", Command: "bin/rbw"}, have: []string{"bin/rbw"},
+			want: vaultcheck.Result{
+				Name: "x", Kind: "rbw", State: vaultcheck.Fail, Detail: "command bin/rbw is not an absolute path",
+				Hint: "set command in .chezmoidata/secrets.toml to an absolute path, ~/..., or a bare name",
+			},
+		},
+		{
 			name: "bw unlocked", entry: vaultcheck.Entry{Name: "pw", Kind: "bw"}, have: []string{"bw"},
 			reply: script{stdout: `{"userEmail":"octocat@example.com","status":"unlocked"}`},
 			want:  vaultcheck.Result{Name: "pw", Kind: "bw", State: vaultcheck.OK, Detail: "vault unlocked"},
