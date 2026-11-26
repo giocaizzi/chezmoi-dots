@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 
@@ -49,7 +48,7 @@ func (l Linter) Run(ctx context.Context, name string) ([]finding.Finding, error)
 	case "packages":
 		return l.packages(ctx)
 	case "matrix":
-		return l.matrix()
+		return l.matrix(ctx)
 	case "templates":
 		return l.templates(ctx)
 	}
@@ -122,26 +121,18 @@ func (l Linter) packages(ctx context.Context) ([]finding.Finding, error) {
 	return pkgreg.Validate(data), nil
 }
 
-// matrix checks the config template's [data] keys against what the matrix seeds:
-// they are written apart and must agree.
-func (l Linter) matrix() ([]finding.Finding, error) {
-	tmpl, err := os.ReadFile(filepath.Join(l.Src, ".chezmoi.toml.tmpl"))
+// matrix checks the matrix declaration in the chezmoi data.
+func (l Linter) matrix(ctx context.Context) ([]finding.Finding, error) {
+	data, err := l.Iso.Data(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("read config template: %w", err)
+		return nil, err
 	}
-	var out []finding.Finding
-	var seeded []string
-	for k := range matrix.Seed("personal", nil, nil) {
-		seeded = append(seeded, k)
-	}
-	slices.Sort(seeded)
-	if got := matrix.DataKeys(tmpl); !slices.Equal(got, seeded) {
-		out = append(out, finding.New(".chezmoi.toml.tmpl", "[data] keys %v differ from the keys the configuration matrix seeds %v (internal/matrix Seed)", got, seeded))
-	}
-	return out, nil
+	_, fs := matrix.ParseSpec(data)
+	return fs, nil
 }
 
-// templates renders the script and alias templates for every configuration and runs
+// templates renders the script and alias templates for every configuration, and for
+// every variant the matrix declares, and runs
 // the linter of their language over the result; a template that renders empty does
 // not apply to that configuration and is skipped, like chezmoi skips it.
 func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
@@ -149,16 +140,11 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Also a single harness (the first the config template offers), which gates the
-	// harness scripts differently.
-	if first, ok := l.firstHarness(); ok {
-		for _, e := range slices.Clone(entries) {
-			if e.Role != "light" {
-				e.Overrides = e.Overrides.Clone(chez.Overrides{"harnesses": []string{first}})
-				entries = append(entries, e)
-			}
-		}
+	spec, err := matrix.Load(ctx, l.Iso)
+	if err != nil {
+		return nil, err
 	}
+	entries = spec.Expand(entries)
 	files, err := l.templateFiles()
 	if err != nil {
 		return nil, err
@@ -186,20 +172,6 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 	}
 	_ = g.Wait()
 	return out, nil
-}
-
-// firstHarness returns the first harness choice of the config template; ok is false
-// when the template offers none.
-func (l Linter) firstHarness() (string, bool) {
-	tmpl, err := os.ReadFile(filepath.Join(l.Src, ".chezmoi.toml.tmpl"))
-	if err != nil {
-		return "", false
-	}
-	choices := matrix.Harnesses(tmpl)
-	if len(choices) == 0 {
-		return "", false
-	}
-	return choices[0], true
 }
 
 // templateFiles lists the templates worth rendering whole: every script, the alias

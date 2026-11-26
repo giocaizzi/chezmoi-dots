@@ -94,6 +94,25 @@ func (c *Client) Data(ctx context.Context, o Overrides) (map[string]any, error) 
 	return m, nil
 }
 
+// ConfigData returns the [data] table of the configuration file the client targets
+// (chezmoi dump-config), without the computed template data.
+func (c *Client) ConfigData(ctx context.Context) (map[string]any, error) {
+	out, err := c.output(ctx, nil, nil, "dump-config", "--format", "json")
+	if err != nil {
+		return nil, err
+	}
+	var cfg struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(out, &cfg); err != nil {
+		return nil, fmt.Errorf("decode chezmoi config: %w", err)
+	}
+	if cfg.Data == nil {
+		cfg.Data = map[string]any{}
+	}
+	return cfg.Data, nil
+}
+
 // Dump returns the target state without directories and externals.
 func (c *Client) Dump(ctx context.Context, o Overrides) (State, error) {
 	out, err := c.output(ctx, render(o), nil, "dump", "--exclude", "dirs,externals", "--format", "json")
