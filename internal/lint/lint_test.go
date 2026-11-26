@@ -115,17 +115,19 @@ func TestLinterArgv(t *testing.T) {
 func TestTemplateFilesSkipsSecretPartials(t *testing.T) {
 	t.Parallel()
 	tests := []struct{ name, body string }{
-		{name: "xfail: a template whose partial calls a password manager", body: "{{ template \"creds.tmpl\" . }}\n"},
-		{name: "xfail: a template that includeTemplates a secret partial", body: "{{ includeTemplate \"creds.tmpl\" . }}\n"},
+		{name: "a template whose partial calls a password manager", body: "{{ template \"creds.tmpl\" . }}\n"},
+		{name: "a template that includeTemplates a secret partial", body: "{{ includeTemplate \"creds.tmpl\" . }}\n"},
+		{name: "a secret partial behind a cycle of partials", body: "{{ template \"loop/a.tmpl\" . }}\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			t.Skip("xfail: callsSecret reads only the template's own actions, not the partials it calls")
 			src := t.TempDir()
 			for name, body := range map[string]string{
-				".chezmoitemplates/creds.tmpl": "{{ bitwarden \"item\" \"id\" }}\n",
-				"dot_config/creds.sh.tmpl":     tt.body,
+				".chezmoitemplates/creds.tmpl":  "{{ bitwarden \"item\" \"id\" }}\n",
+				".chezmoitemplates/loop/a.tmpl": "{{ template \"loop/b.tmpl\" . }}\n",
+				".chezmoitemplates/loop/b.tmpl": "{{ template \"loop/a.tmpl\" . }}{{ template \"creds.tmpl\" . }}\n",
+				"dot_config/creds.sh.tmpl":      tt.body,
 			} {
 				p := filepath.Join(src, filepath.FromSlash(name))
 				if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
