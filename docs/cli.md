@@ -484,7 +484,8 @@ exit 2). The entry has the keys `version`, `url`, `type`, `path`, `exe`, `roles`
 `requires`, then the target and sha256 tables; the checksums are computed as in
 release mode, so it downloads every target's archive.
 
-`--roles` takes a comma list of `personal`, `work`, `light` and writes
+`--roles` takes a comma list of the profiles declared in the `matrix` table of
+the chezmoi data (any non-empty name when none is declared) and writes
 `roles = [...]`; `--requires <answer>` writes `requires = "<answer>"`. Both work
 in every mode. Package source flags with `--release`, release flags
 (`--version`, `--url`, `--target`) without it, a missing version, url or target in

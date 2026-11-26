@@ -8,13 +8,13 @@ import (
 	"sort"
 
 	"github.com/giocaizzi/chezmoi-dots/internal/finding"
+	"github.com/giocaizzi/chezmoi-dots/internal/matrix"
 )
 
 var name = regexp.MustCompile(`^[A-Za-z0-9._][A-Za-z0-9._-]*$`)
 
 func shells() []string { return []string{"posix", "powershell"} }
 func oses() []string   { return []string{"darwin", "linux", "windows"} }
-func roles() []string  { return []string{"personal", "work", "light"} }
 func allowed() []string {
 	return []string{"cmd", "posix", "powershell", "shells", "os", "machines", "why"}
 }
@@ -23,9 +23,10 @@ func allowed() []string {
 func Validate(data map[string]any) []finding.Finding {
 	var out []finding.Finding
 	aliases, _ := data["alias"].(map[string]any)
+	declared := matrix.DeclaredProfiles(data)
 	for _, n := range sortedKeys(aliases) {
 		a, _ := aliases[n].(map[string]any)
-		out = append(out, validateAlias(n, a)...)
+		out = append(out, validateAlias(n, a, declared)...)
 	}
 	blocks, _ := data["aliasBlock"].(map[string]any)
 	for _, n := range sortedKeys(blocks) {
@@ -46,7 +47,7 @@ func Validate(data map[string]any) []finding.Finding {
 	return out
 }
 
-func validateAlias(n string, a map[string]any) []finding.Finding {
+func validateAlias(n string, a map[string]any, declared []string) []finding.Finding {
 	var out []finding.Finding
 	bad := func(format string, args ...any) { out = append(out, finding.New("alias "+n, format, args...)) }
 	if !name.MatchString(n) {
@@ -75,7 +76,7 @@ func validateAlias(n string, a map[string]any) []finding.Finding {
 		}
 	}
 	checkSubset(a, "os", oses(), bad)
-	checkSubset(a, "machines", roles(), bad)
+	checkMachines(a, declared, bad)
 	return out
 }
 
@@ -141,4 +142,22 @@ func sortedKeys(m map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// checkMachines reports a machines value that is not a list of non-empty names, each a
+// declared profile when any profile is declared.
+func checkMachines(a map[string]any, declared []string, bad func(string, ...any)) {
+	v, ok := a["machines"]
+	if !ok {
+		return
+	}
+	got, isList := stringList(v)
+	valid := isList && !slices.Contains(got, "") && (declared == nil || subset(got, declared))
+	switch {
+	case valid:
+	case declared == nil:
+		bad("machines must be a list of non-empty names")
+	default:
+		bad("machines must be a subset of the declared profiles %v", declared)
+	}
 }

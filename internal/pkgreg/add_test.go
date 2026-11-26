@@ -177,9 +177,15 @@ func TestValidPlatformAndRole(t *testing.T) {
 			t.Errorf("ValidPlatform(%q) = %v, want %v", p, got, want)
 		}
 	}
-	for r, want := range map[string]bool{"personal": true, "work": true, "light": true, "admin": false, "": false} {
-		if got := pkgreg.ValidRole(r); got != want {
-			t.Errorf("ValidRole(%q) = %v, want %v", r, got, want)
+	declared := []string{"home", "minimal"}
+	for r, want := range map[string]bool{"home": true, "minimal": true, "work": false, "": false} {
+		if got := pkgreg.ValidRole(declared, r); got != want {
+			t.Errorf("ValidRole(declared, %q) = %v, want %v", r, got, want)
+		}
+	}
+	for r, want := range map[string]bool{"anything": true, "": false} {
+		if got := pkgreg.ValidRole(nil, r); got != want {
+			t.Errorf("ValidRole(nil, %q) = %v, want %v", r, got, want)
 		}
 	}
 }

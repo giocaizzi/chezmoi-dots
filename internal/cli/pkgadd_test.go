@@ -243,6 +243,36 @@ func TestPkgAddFlagForms(t *testing.T) {
 	}
 }
 
+func TestPkgAddRolesAgainstDeclaredProfiles(t *testing.T) {
+	t.Parallel()
+	const declared = `{"matrix":{"profile":{"home":{},"minimal":{}}}}`
+	t.Run("undeclared role", func(t *testing.T) {
+		t.Parallel()
+		e := newPkgAddEnv(t, pkgAddOldText, declared)
+		err := e.run(t, "wget", "--brew", "--roles", "home,admin")
+		if !errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), "home, minimal") || !strings.Contains(err.Error(), `"admin"`) {
+			t.Fatalf("pkg add = %v, want a usage error naming the declared profiles", err)
+		}
+		if got := e.text(t); got != pkgAddOldText {
+			t.Errorf("a rejected command changed packages.toml:\n%s", got)
+		}
+	})
+	t.Run("declared role", func(t *testing.T) {
+		t.Parallel()
+		e := newPkgAddEnv(t, pkgAddOldText, declared)
+		if err := e.run(t, "wget", "--brew", "--roles", "minimal"); err != nil {
+			t.Fatalf("pkg add = %v, want it to pass", err)
+		}
+	})
+	t.Run("no declaration accepts any name", func(t *testing.T) {
+		t.Parallel()
+		e := newPkgAddEnv(t, pkgAddOldText, `{}`)
+		if err := e.run(t, "wget", "--brew", "--roles", "admin"); err != nil {
+			t.Fatalf("pkg add = %v, want it to pass", err)
+		}
+	})
+}
+
 func TestPkgAddUsageErrors(t *testing.T) {
 	t.Parallel()
 	const url = "https://example.com/{version}/tool-{target}.tar.gz"
@@ -254,7 +284,6 @@ func TestPkgAddUsageErrors(t *testing.T) {
 		{"two names", []string{"a", "b", "--brew"}},
 		{"bad name", []string{"a b", "--brew"}},
 		{"name with a dot", []string{"a.b", "--brew"}},
-		{"bad role", []string{"wget", "--brew", "--roles", "personal,admin"}},
 		{"empty role", []string{"wget", "--brew", "--roles", ""}},
 		{"empty requires", []string{"wget", "--brew", "--requires", ""}},
 		{"empty brew value", []string{"wget", "--brew="}},
