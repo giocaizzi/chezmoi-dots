@@ -4,7 +4,7 @@ Source of truth for decisions, architecture and runbooks of this repo.
 
 - [Command reference](cli.md): arguments, options, defaults, environment and help/error semantics.
 - [Everyday workflow](workflow.md): daily check, editing, upgrades, pin updates, CI usage and migrating from 0.x command names.
-- [Matrix](matrix.md): the nine OS and role configurations, how their data is produced and the opt-in `matrix` declaration.
+- [Matrix](matrix.md): OS x declared profiles, how their data is produced and the opt-in `matrix` declaration.
 - [Build and install locally](local-build-install.md): checks, build, optional installation, verification and rollback.
 
 ## Apply and publish source edits
