@@ -18,6 +18,7 @@ diff = "first"
 desc = "Notes folder"
 local = "projects/notes"
 
+# optional: lets edit open the registry file itself
 [edit.registry]
 desc = "Edit registry"
 source = ".chezmoidata/edit.toml"
@@ -65,13 +66,5 @@ Every `source` must exist. Every file under `.chezmoidata/` and every `.age`
 file in the source needs an entry whose `source` is that path, otherwise the
 finding is `<path>: no edit registry entry`.
 
-This includes `.chezmoidata/edit.toml` itself. The first `chezmoi dots add` on a
-source whose registry file has no entry creates the file with the new entry and
-then validates the registry: it exits 1 with `.chezmoidata/edit.toml: no edit
-registry entry` and keeps the entry. Fix it by registering the registry file:
-
-```toml
-[edit.registry]
-desc = "Edit registry"
-source = ".chezmoidata/edit.toml"
-```
+The registry file `.chezmoidata/edit.toml` itself is exempt: it needs no entry,
+and an entry for it stays allowed.

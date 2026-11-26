@@ -117,10 +117,8 @@ exits non-zero with chezmoi's error (naming the added file and the kept entry)
 and skips the registry validation; run `chezmoi dots lint registry` afterwards.
 When `chezmoi add` succeeded, `add` validates the whole registry; findings exit 1
 and the entry is kept. The validation includes the coverage rule of the
-[edit registry](edit-registry.md#coverage): if the source has no entry for
-`.chezmoidata/edit.toml` itself, the first `add` exits 1 with
-`.chezmoidata/edit.toml: no edit registry entry` and keeps the entry; register
-the registry file as shown there.
+[edit registry](edit-registry.md#coverage), which exempts `.chezmoidata/edit.toml`
+itself, so the first `add` on a new source exits 0.
 
 Registering a file chezmoi already manages, or a `--local` folder, runs no
 `chezmoi add`, so `add` follows the same git settings as `edit`: with

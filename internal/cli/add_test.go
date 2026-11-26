@@ -85,6 +85,25 @@ func TestAddUnmanagedFile(t *testing.T) {
 	}
 }
 
+// The registry file needs no entry for itself: the first add on a source whose edit.toml
+// has none succeeds.
+func TestAddFirstEntryNeedsNoRegistryEntry(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.isolate(t)
+	reg := filepath.Join(e.src, ".chezmoidata", "edit.toml")
+	e.file(t, filepath.Join(e.src, ".chezmoidata"), "edit.toml", "[edit.note]\ndesc = \"A note\"\nsource = \"dot_note.tmpl\"\n")
+	target := e.file(t, e.dest, ".first-extra", "x\n")
+
+	if _, stderr, err := e.run(t, "", "add", target, "--desc", "First"); err != nil {
+		t.Fatalf("first add = %v\n%s", err, stderr)
+	}
+	b, err := os.ReadFile(reg)
+	if err != nil || !strings.Contains(string(b), "[edit.first-extra]") || strings.Contains(string(b), `source = ".chezmoidata/edit.toml"`) {
+		t.Errorf("registry = %q, %v", b, err)
+	}
+}
+
 func TestAddTemplate(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
