@@ -93,6 +93,13 @@ func TestParseSpecFindings(t *testing.T) {
 		{"reserved in seed", map[string]any{"seed": map[string]any{"light": true}}, "matrix.seed.light", "reserved"},
 		{"reserved in role", map[string]any{"role": map[string]any{"work": map[string]any{"work": true}}}, "matrix.role.work.work", "reserved"},
 		{"reserved in set", variant(map[string]any{"name": "v", "set": map[string]any{"work": true}}), "matrix.variant[0].set.work", "reserved"},
+		{"chezmoi reserved in seed", map[string]any{"seed": map[string]any{"chezmoi": "x"}}, "matrix.seed.chezmoi", "reserved"},
+		{"chezmoi reserved in role", map[string]any{"role": map[string]any{"work": map[string]any{"chezmoi": "x"}}}, "matrix.role.work.chezmoi", "reserved"},
+		{"chezmoi reserved in set", variant(map[string]any{"name": "v", "set": map[string]any{"chezmoi": "x"}}), "matrix.variant[0].set.chezmoi", "reserved"},
+		{"key not bare", map[string]any{"seed": map[string]any{"my key": "v"}}, "matrix.seed.my key", "not a bare TOML key"},
+		{"key with dot", map[string]any{"seed": map[string]any{"a.b": "v"}}, "matrix.seed.a.b", "not a bare TOML key"},
+		{"variant empty roles", variant(map[string]any{"name": "v", "set": set, "roles": []any{}}), "matrix.variant[0].roles", "roles is empty"},
+		{"variant name not a string", variant(map[string]any{"name": float64(1), "set": set}), "matrix.variant[0].name", "name must be a string"},
 		{"number value", map[string]any{"seed": map[string]any{"n": float64(1)}}, "matrix.seed.n", "string, a boolean or a list of strings"},
 		{"mixed list", map[string]any{"seed": map[string]any{"l": []any{"a", true}}}, "matrix.seed.l", "list of strings"},
 		{"table value", map[string]any{"seed": map[string]any{"t": map[string]any{}}}, "matrix.seed.t", "list of strings"},
@@ -269,54 +276,6 @@ func TestRoleAbbr(t *testing.T) {
 			if got := tt.config.RoleAbbr(); got != tt.want {
 				t.Errorf("%v.RoleAbbr() = %q, want %q", tt.config, got, tt.want)
 			}
-		})
-	}
-}
-
-// Review findings on the declaration checks. Each subtest is an x-failure: remove
-// its t.Skip once ParseSpec reports the finding.
-func TestParseSpecReviewXFail(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name, skip string
-		matrix     any
-		where, in  string
-	}{
-		{
-			// Expand layers set over the entry's overrides, so a `chezmoi` answer replaces
-			// the per-OS {"os": ...} override and every OS renders alike.
-			name: "xfail: chezmoi is reserved in set", skip: "xfail: ParseSpec accepts a set that replaces the chezmoi override",
-			matrix: map[string]any{"variant": []any{map[string]any{"name": "v", "set": map[string]any{"chezmoi": "x"}}}},
-			where:  "matrix.variant[0].set.chezmoi", in: "reserved",
-		},
-		{
-			// An explicit empty list silently means every role, like an absent one.
-			name: "xfail: an empty roles list is a finding", skip: "xfail: ParseSpec treats roles = [] as every role",
-			matrix: map[string]any{"variant": []any{map[string]any{"name": "v", "roles": []any{}, "set": map[string]any{"a": "b"}}}},
-			where:  "matrix.variant[0].roles", in: "",
-		},
-		{
-			// TOML writes keys bare, so a declared key that needs quoting breaks the
-			// seed config at render time while lint matrix passes.
-			name: "xfail: a key TOML cannot write bare is a finding or is quoted", skip: "xfail: ParseSpec accepts it and TOML writes it bare",
-			matrix: map[string]any{"seed": map[string]any{"my key": "v"}},
-			where:  "matrix.seed.my key", in: "",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			t.Skip(tt.skip)
-			spec, fs := ParseSpec(map[string]any{"matrix": tt.matrix})
-			for _, f := range fs {
-				if f.Where == tt.where && strings.Contains(f.Message, tt.in) {
-					return
-				}
-			}
-			if tt.where == "matrix.seed.my key" && strings.Contains(TOML(spec.Answers("work")), `"my key" = "v"`) {
-				return // quoting the key is a fix too
-			}
-			t.Errorf("ParseSpec() findings = %v, want one at %q containing %q", fs, tt.where, tt.in)
 		})
 	}
 }

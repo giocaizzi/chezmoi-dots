@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -180,11 +181,19 @@ func parseVariants(raw any, fs []finding.Finding) ([]Variant, []finding.Finding)
 			fs = append(fs, finding.New(where, "must be a table"))
 			continue
 		}
-		var v Variant
+		var (
+			v     Variant
+			named bool // name was given but is not a string: already reported
+		)
 		for _, k := range sortedKeys(m) {
 			switch k {
 			case "name":
-				v.Name, _ = m[k].(string)
+				name, isString := m[k].(string)
+				if !isString {
+					fs = append(fs, finding.New(where+".name", "name must be a string"))
+					named = true
+				}
+				v.Name = name
 			case "roles":
 				v.Roles, fs = parseVariantRoles(m[k], where, fs)
 			case "set":
@@ -194,6 +203,8 @@ func parseVariants(raw any, fs []finding.Finding) ([]Variant, []finding.Finding)
 			}
 		}
 		switch {
+		case named:
+			continue
 		case v.Name == "":
 			fs = append(fs, finding.New(where, "missing name"))
 			continue
@@ -215,6 +226,9 @@ func parseVariantRoles(raw any, where string, fs []finding.Finding) ([]string, [
 	if !ok {
 		return nil, append(fs, finding.New(where+".roles", "must be a list of roles"))
 	}
+	if len(list) == 0 {
+		return nil, append(fs, finding.New(where+".roles", "roles is empty; omit it for every role"))
+	}
 	var roles []string
 	for _, item := range list {
 		role, _ := item.(string)
@@ -226,6 +240,8 @@ func parseVariantRoles(raw any, where string, fs []finding.Finding) ([]string, [
 	}
 	return roles, fs
 }
+
+var bareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // parseAnswers reads a table of answers: strings, booleans and lists of strings,
 // with the per-role flags reserved.
@@ -239,6 +255,10 @@ func parseAnswers(raw any, where string, fs []finding.Finding) (map[string]any, 
 		switch {
 		case k == roleLight || k == roleWork:
 			fs = append(fs, finding.New(where+"."+k, "reserved: the matrix sets it per role"))
+		case k == chezmoiKey:
+			fs = append(fs, finding.New(where+"."+k, "reserved: the matrix sets it per OS"))
+		case !bareKey.MatchString(k):
+			fs = append(fs, finding.New(where+"."+k, "not a bare TOML key (letters, digits, _ and -)"))
 		case !validAnswer(m[k]):
 			fs = append(fs, finding.New(where+"."+k, "must be a string, a boolean or a list of strings"))
 		default:
