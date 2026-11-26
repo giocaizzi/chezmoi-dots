@@ -71,6 +71,7 @@ type pkgAddEnv struct {
 	managers  []string // package managers on PATH
 	stdin     string
 	tty       bool
+	devNull   bool // stdin is the null device, with terminal detection left to the command
 }
 
 const (
@@ -117,6 +118,16 @@ func withoutNotes(out string) string {
 
 func (e *pkgAddEnv) run(t *testing.T, args ...string) error {
 	t.Helper()
+	var stdin io.Reader = strings.NewReader(e.stdin)
+	interactive := func() bool { return e.tty }
+	if e.devNull {
+		f, err := os.Open(os.DevNull)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = f.Close() })
+		stdin, interactive = f, nil
+	}
 	d := cli.Deps{
 		Getenv: func(key string) string {
 			switch key {
@@ -127,7 +138,7 @@ func (e *pkgAddEnv) run(t *testing.T, args ...string) error {
 			}
 			return ""
 		},
-		Stdin:  strings.NewReader(e.stdin),
+		Stdin:  stdin,
 		Stdout: &e.out, Stderr: &e.errw, Runner: e.runner, HTTP: &http.Client{Transport: e.http},
 		LookPath: func(n string) (string, error) {
 			if slices.Contains(e.managers, n) {
@@ -135,7 +146,7 @@ func (e *pkgAddEnv) run(t *testing.T, args ...string) error {
 			}
 			return "", errors.New("not found")
 		},
-		Home: t.TempDir(), GOOS: e.hostOS(), Interactive: func() bool { return e.tty },
+		Home: t.TempDir(), GOOS: e.hostOS(), Interactive: interactive,
 	}
 	return cli.Run(t.Context(), d, append([]string{"pkg", "add"}, args...))
 }
@@ -579,6 +590,17 @@ func TestPkgAddDetect(t *testing.T) { //nolint:gocognit // table test with two o
 				t.Errorf("packages.toml (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestPkgAddNullStdinIsNotATerminal(t *testing.T) {
+	t.Parallel()
+	e := detectEnv(t, pkgAddOldText, `{}`, `{"package":{"wget":{"brew":"wget"}}}`)
+	e.devNull = true
+	err := e.run(t, "wget")
+	const want = "detected sources need confirmation; pass --yes or set them with flags"
+	if !errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), want) {
+		t.Fatalf("pkg add = %v, want a usage error containing %q", err, want)
 	}
 }
 
