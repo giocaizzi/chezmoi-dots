@@ -53,6 +53,9 @@ func (ExecRunner) Run(ctx context.Context, c Cmd) error {
 	if len(c.Env) > 0 {
 		cmd.Env = append(cmd.Environ(), c.Env...)
 	}
+	if c.Group {
+		groupCmd(cmd)
+	}
 	cmd.WaitDelay = waitDelay
 	// ErrWaitDelay with a live context means the child exited 0 and only a
 	// grandchild kept the output pipe open.
