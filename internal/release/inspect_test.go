@@ -7,10 +7,12 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -167,4 +169,58 @@ func TestInspectChecksumsArchivesOverTheListingLimits(t *testing.T) {
 	if diff := cmp.Diff(map[string][]archive.File{"linux/amd64": nil, "windows/amd64": nil}, files); diff != "" {
 		t.Errorf("files (-want +got):\n%s", diff)
 	}
+}
+
+// pacedTransport answers every request with body, served in ten reads that each take
+// delay once the client asks for them, the way a connection with a throughput cap
+// does; a read fails once the request's context is done.
+type pacedTransport struct {
+	body  []byte
+	delay time.Duration
+}
+
+func (p pacedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{StatusCode: http.StatusOK, ContentLength: -1, Request: req, Body: &pacedBody{
+		req: req, rest: p.body, chunk: len(p.body)/10 + 1, delay: p.delay,
+	}}, nil
+}
+
+type pacedBody struct {
+	req   *http.Request // its context ends the body
+	rest  []byte
+	chunk int
+	delay time.Duration
+}
+
+func (b *pacedBody) Read(p []byte) (int, error) {
+	if len(b.rest) == 0 {
+		return 0, io.EOF
+	}
+	select {
+	case <-b.req.Context().Done():
+		return 0, b.req.Context().Err()
+	case <-time.After(b.delay):
+	}
+	n := copy(p, b.rest[:min(len(b.rest), b.chunk)])
+	b.rest = b.rest[n:]
+	return n, nil
+}
+
+func (b *pacedBody) Close() error { return nil }
+
+func TestInspectZipsWithinTheDownloadTimeout(t *testing.T) {
+	t.Parallel()
+	t.Run("xfail: waiting for the zip spool does not count against a download's timeout", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: archive.listZip takes its process-wide lock while the body is still unread, " +
+			"so the second zip's DownloadTimeout runs out while it waits for the first; Inspect then fails " +
+			"although each download alone takes about 600ms of the 1s timeout")
+		f := Finder{HTTP: &http.Client{Transport: pacedTransport{body: zipOf(t, "tool.exe"), delay: 60 * time.Millisecond}}, DownloadTimeout: time.Second}
+		rel := pkgreg.Release{Name: "tool", Version: "1", URL: "https://example.invalid/{target}", Targets: map[string]string{
+			"windows/amd64": "amd64.zip", "windows/arm64": "arm64.zip",
+		}}
+		if _, _, err := f.Inspect(t.Context(), rel, "1"); err != nil {
+			t.Errorf("Inspect = %v, want the two downloads to succeed", err)
+		}
+	})
 }

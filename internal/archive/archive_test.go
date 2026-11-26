@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -220,30 +221,60 @@ func TestListErrors(t *testing.T) {
 	}
 }
 
+// tarGzFormat writes a .tar.gz of one regular file with the name in the given format.
+func tarGzFormat(t *testing.T, format tar.Format, name string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Typeflag: tar.TypeReg, Format: format}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+// archive/tar accepts GNU and PAX names up to 1 MiB, which compress about 1000:1, so a
+// small download could fill memory if List kept them: one byte over the cap is refused.
+func TestListRejectsLongNames(t *testing.T) {
+	t.Parallel()
+	maxLen := archive.DefaultLimits().MaxNameLen
+	kinds := []struct {
+		name string
+		kind archive.Kind
+		make func(t *testing.T, name string) []byte
+	}{
+		{"gnu tar", archive.TarGz, func(t *testing.T, n string) []byte { t.Helper(); return tarGzFormat(t, tar.FormatGNU, n) }},
+		{"pax tar", archive.TarGz, func(t *testing.T, n string) []byte { t.Helper(); return tarGzFormat(t, tar.FormatPAX, n) }},
+		{"zip", archive.Zip, func(t *testing.T, n string) []byte {
+			t.Helper()
+			return zipBytes(t, []entry{{name: n, mode: 0o755}}, true)
+		}},
+	}
+	for _, k := range kinds {
+		for _, n := range []int{maxLen, maxLen + 1} {
+			t.Run(fmt.Sprintf("%s name of %d bytes", k.name, n), func(t *testing.T) {
+				t.Parallel()
+				files, err := archive.List(k.kind, bytes.NewReader(k.make(t, strings.Repeat("a", n))))
+				want := error(nil)
+				if n > maxLen {
+					want = archive.ErrNameTooLong
+				}
+				if !errors.Is(err, want) || (want == nil && len(files) != 1) {
+					t.Errorf("List = %d files, %v; want %v", len(files), err, want)
+				}
+			})
+		}
+	}
+}
+
 func TestListBoundsNameMemory(t *testing.T) {
 	t.Parallel()
-	t.Run("long entry names are rejected, so a small download cannot fill memory", func(t *testing.T) {
-		t.Parallel()
-		var buf bytes.Buffer
-		zw := gzip.NewWriter(&buf)
-		tw := tar.NewWriter(zw)
-		long := strings.Repeat("a", 1<<20-16) // a GNU long name just under archive/tar's 1 MiB limit
-		for i := range 128 {
-			hdr := &tar.Header{Name: fmt.Sprintf("%s%d", long, i), Mode: 0o755, Typeflag: tar.TypeReg, Format: tar.FormatGNU}
-			if err := tw.WriteHeader(hdr); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if err := tw.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if err := zw.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if files, err := archive.List(archive.TarGz, &buf); !errors.Is(err, archive.ErrNameTooLong) {
-			t.Errorf("List = %d files, %v; want %v", len(files), err, archive.ErrNameTooLong)
-		}
-	})
 	t.Run("total name bytes are capped", func(t *testing.T) {
 		t.Parallel()
 		entries := make([]entry, 10)
@@ -259,13 +290,6 @@ func TestListBoundsNameMemory(t *testing.T) {
 			if _, err := archive.ListLimits(kind, bytes.NewReader(data), l); !errors.Is(err, archive.ErrNamesTooLarge) {
 				t.Errorf("kind %v: ListLimits = %v, want %v", kind, err, archive.ErrNamesTooLarge)
 			}
-		}
-	})
-	t.Run("zip names over the length cap are rejected", func(t *testing.T) {
-		t.Parallel()
-		data := zipBytes(t, []entry{{name: strings.Repeat("a", 5000), mode: 0o644}}, true)
-		if _, err := archive.List(archive.Zip, bytes.NewReader(data)); !errors.Is(err, archive.ErrNameTooLong) {
-			t.Errorf("List = %v, want %v", err, archive.ErrNameTooLong)
 		}
 	})
 }
@@ -325,18 +349,37 @@ func TestListZipLimits(t *testing.T) {
 		if !errors.Is(err, archive.ErrTooLarge) || files != nil {
 			t.Errorf("ListLimits = %v, %v; want nil, %v", files, err, archive.ErrTooLarge)
 		}
-		// An endless body must stop at the cap instead of filling the disk.
+		// A body far over the cap is read only up to it. The body is finite, so a
+		// regression fails here instead of filling the disk.
 		l.MaxZipSpool = 1 << 10
-		endless := readerFunc(func(p []byte) (int, error) { return len(p), nil })
-		if _, err := archive.ListLimits(archive.Zip, endless, l); !errors.Is(err, archive.ErrTooLarge) {
-			t.Errorf("ListLimits of an endless body = %v, want %v", err, archive.ErrTooLarge)
+		var read int64
+		long := readerFunc(func(p []byte) (int, error) {
+			n := min(int64(len(p)), 1<<20-read)
+			if n == 0 {
+				return 0, io.EOF
+			}
+			read += n
+			return int(n), nil
+		})
+		if _, err := archive.ListLimits(archive.Zip, long, l); !errors.Is(err, archive.ErrTooLarge) || read > l.MaxZipSpool+1 {
+			t.Errorf("ListLimits of a long body = %v after reading %d bytes, want %v after at most %d", err, read, archive.ErrTooLarge, l.MaxZipSpool+1)
 		}
-		l.MaxZipSpool = int64(len(data)) - 1
 		l.MaxZipSpool = int64(len(data))
 		if files, err := archive.ListLimits(archive.Zip, bytes.NewReader(data), l); err != nil || len(files) != 2 {
 			t.Errorf("ListLimits at the cap = %v, %v; want 2 files", files, err)
 		}
 	})
+	t.Run("not a zip", func(t *testing.T) {
+		t.Parallel()
+		if _, err := archive.List(archive.Zip, bytes.NewReader([]byte("x"))); !errors.Is(err, zip.ErrFormat) {
+			t.Errorf("List = %v, want %v", err, zip.ErrFormat)
+		}
+	})
+}
+
+func TestListZipCentralDirectory(t *testing.T) {
+	t.Parallel()
+	data := zipBytes(t, []entry{{name: "d/tool", mode: 0o755}, {name: "d/other", mode: 0o644}}, true)
 	t.Run("a central directory over the cap is refused", func(t *testing.T) {
 		t.Parallel()
 		l := archive.DefaultLimits()
@@ -355,10 +398,53 @@ func TestListZipLimits(t *testing.T) {
 			t.Errorf("List = %v, want %v", err, archive.ErrTooLarge)
 		}
 	})
-	t.Run("not a zip", func(t *testing.T) {
+	t.Run("a zip64 directory size is read from the zip64 record", func(t *testing.T) {
 		t.Parallel()
-		if _, err := archive.List(archive.Zip, bytes.NewReader([]byte("x"))); !errors.Is(err, zip.ErrFormat) {
-			t.Errorf("List = %v, want %v", err, zip.ErrFormat)
+		// From 65535 entries archive/zip writes the zip64 records. Other writers also put
+		// the 0xFFFFFFFF marker in the 32-bit directory size, which alone is over the cap.
+		entries := make([]entry, 1<<16-1)
+		entries[0] = entry{name: "tool", mode: 0o755}
+		for i := 1; i < len(entries); i++ {
+			entries[i] = entry{name: fmt.Sprintf("d%d/", i), mode: 0o755}
+		}
+		data := zipBytes(t, entries, true)
+		eocd := bytes.LastIndex(data, []byte("PK\x05\x06"))
+		binary.LittleEndian.PutUint32(data[eocd+12:], math.MaxUint32)
+		files, err := archive.List(archive.Zip, bytes.NewReader(data))
+		if err != nil || len(files) != 1 {
+			t.Errorf("List = %d files, %v; want one file", len(files), err)
+		}
+	})
+	t.Run("xfail: an understated directory size does not get past the cap", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: checkCentralDir trusts the size and count the EOCD declares, but zip.NewReader " +
+			"reads directory headers from the offset until a bad one (and compares the count mod 65536 only), " +
+			"so a forged EOCD gets any directory up to the spool cap built in memory (1.4 GiB for a 255 MiB zip)")
+		entries := make([]entry, 200)
+		for i := range entries {
+			entries[i] = entry{name: fmt.Sprintf("d/file-%d", i), mode: 0o755}
+		}
+		forged := zipBytes(t, entries, true) // a directory of about 10 KiB
+		eocd := bytes.LastIndex(forged, []byte("PK\x05\x06"))
+		binary.LittleEndian.PutUint32(forged[eocd+12:], 46) // declares one 46-byte header
+		l := archive.DefaultLimits()
+		l.MaxCentralDir = 1 << 10
+		if files, err := archive.ListLimits(archive.Zip, bytes.NewReader(forged), l); !errors.Is(err, archive.ErrTooLarge) {
+			t.Errorf("ListLimits = %d files, %v; want %v", len(files), err, archive.ErrTooLarge)
+		}
+	})
+}
+
+func TestListLimitsAtTheTop(t *testing.T) {
+	t.Parallel()
+	t.Run("xfail: a MaxDecompressed of math.MaxInt64 does not panic", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: capReader computes c.left+1, which overflows to math.MinInt64 and slices p[:MinInt64]")
+		l := archive.DefaultLimits()
+		l.MaxDecompressed = math.MaxInt64 // no practical cap
+		files, err := archive.ListLimits(archive.TarGz, bytes.NewReader(tarGz(t, []entry{{name: "tool", mode: 0o755}})), l)
+		if err != nil || len(files) != 1 {
+			t.Errorf("ListLimits = %v, %v; want one file", files, err)
 		}
 	})
 }
