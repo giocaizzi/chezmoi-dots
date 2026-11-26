@@ -21,7 +21,7 @@ func (d Deps) status(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(pos) > 0 {
-		return ErrUsage
+		return &commandError{command: cmdStatus, err: fmt.Errorf("%w: status takes no arguments (got %q)", ErrUsage, pos[0])}
 	}
 	cz, _ := d.chezmoi()
 	wt := d.Getenv("CHEZMOI_WORKING_TREE")

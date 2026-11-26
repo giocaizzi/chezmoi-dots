@@ -133,7 +133,7 @@ func (d Deps) list(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(pos) > 0 {
-		return ErrUsage
+		return &commandError{command: cmdList, err: fmt.Errorf("%w: list takes no arguments (got %q)", ErrUsage, pos[0])}
 	}
 	s, err := d.service(ctx, term.NewStyle(d.Stdout, d.Getenv))
 	if err != nil {

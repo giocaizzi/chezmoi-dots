@@ -316,6 +316,28 @@ func TestUsageReportsLocalHelpOnce(t *testing.T) {
 	}
 }
 
+func TestUsageNamesExtraArgument(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"status", "extra"}, `status takes no arguments (got "extra")`},
+		{[]string{"list", "pattern"}, `list takes no arguments (got "pattern")`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.args[0], func(t *testing.T) {
+			t.Parallel()
+			var out, errw bytes.Buffer
+			trap := &helpTrap{}
+			err := cli.Run(t.Context(), trap.deps(&out, &errw), tt.args)
+			if !errors.Is(err, cli.ErrUsage) || !strings.Contains(errw.String(), tt.want) {
+				t.Errorf("error = %v, stderr %q; want ErrUsage and %q", err, errw.String(), tt.want)
+			}
+		})
+	}
+}
+
 func TestHelpGoldens(t *testing.T) {
 	t.Parallel()
 	for _, page := range []string{"root", "edit", "add", "view", "list", "status", "upgrade", "lint", "audit", "secrets", "secrets run", "pkg", "pkg status", "pkg bump", "pkg add", "version", "help", "live"} {
