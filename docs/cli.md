@@ -594,8 +594,11 @@ means no timeout and a negative value is a usage error (on expiry:
 
 A missing name (`secrets run needs a name`), a name that is not declared, and a
 `bw` or `rbw` entry (no token injection; use the CLI's own session) are usage
-errors (exit 2). A failing CLI exits with its own exit code, printing nothing
-more; an invalid registry, a missing CLI, a missing token or a timeout exit 1.
+errors (exit 2). The CLI's own exit code is passed through, printing nothing
+more: on Unix a CLI killed by a signal exits 128+N (143 for SIGTERM), Ctrl-C exits
+130, and on Windows the code is the one reported. An invalid registry, a missing
+CLI, a missing token or a timeout exit 1. On timeout or Ctrl-C the CLI's whole
+process tree is killed.
 The CLI is the entry's `command` or `bws` on `PATH`; nothing else overrides it,
 and no shell is used. The CLI's output is not filtered. Environment: shared
 chezmoi settings; the child inherits the environment. See

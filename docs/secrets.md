@@ -136,10 +136,12 @@ It works for `bws` entries only: `bw` and `rbw` have no token to inject, so
 - The CLI's output goes straight to stdout and stderr, and stdin is passed through.
 - On timeout or Ctrl-C, `secrets run` and the audit probes kill the CLI's whole process tree (its own process group on Unix, `taskkill /T` on Windows), so the children of a wrapper script do not keep the token.
 
-Exit codes: the CLI's own exit code when it fails; 2 for a usage error (no name,
-unknown subcommand, a name that is not declared, a `bw` or `rbw` entry, an
-unknown option before `--`); 1 for everything else (invalid registry, CLI not
-found, no token in the keyring, timeout).
+Exit codes: the CLI's own exit code; on Unix a CLI killed by a signal exits
+128+N (143 for SIGTERM); Ctrl-C exits 130; on Windows the CLI's code as
+reported; 2 for a usage error (no name, unknown subcommand, a name that is not
+declared, a `bw` or `rbw` entry, an unknown option before `--`); 1 for
+everything else (invalid registry, CLI not found, no token in the keyring,
+timeout).
 
 ```sh
 chezmoi dots secrets run example-vault -- project list
