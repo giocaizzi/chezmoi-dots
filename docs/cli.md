@@ -493,6 +493,14 @@ registry value, archive extension included: with extension-carrying values
 reported as not found. Otherwise the `path` stays the repository name. A `.tar.xz` archive is not listed, and targets with one are left out
 of the check; an archive that cannot be read counts the same.
 
+Listing is bounded against hostile archives: entry names over 4096 bytes or more
+than 16 MiB of names in total, more than 100000 entries, or more than 4 GiB of
+decompressed `.tar.gz` data stop the listing. A `.zip` is spooled only up to 256 MiB,
+one zip at a time across the parallel downloads, and is not listed when its central
+directory is over 64 MiB. An archive that hits a limit counts as unchecked; its
+checksum still covers the whole download. Zip entry names are kept as stored
+(backslashes stay backslashes), as chezmoi matches them when it applies the external.
+
 The proposal goes to stderr: `version`, `url`, `type`, `path`, `exe`, each target
 and its value, then `left out: ...` and `ambiguous: ...`. The `path` line says how it
 was settled: `(found in the archives)`, `(not found in the archives)` followed by a
