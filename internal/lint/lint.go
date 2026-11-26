@@ -74,48 +74,7 @@ func (l Linter) aliases(ctx context.Context) ([]finding.Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := aliasreg.Validate(data)
-	// The private registry needs this machine's age key; where there is none it is skipped.
-	realData, err := l.Real.Data(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	if identity := ageIdentity(realData); identity != "" {
-		if _, statErr := os.Stat(identity); statErr == nil {
-			private, privErr := l.privateAliases(ctx)
-			if privErr != nil {
-				return nil, privErr
-			}
-			out = append(out, private...)
-		}
-	}
-	return out, nil
-}
-
-// privateAliases validates the encrypted private registry, decrypted with this machine's key.
-func (l Linter) privateAliases(ctx context.Context) ([]finding.Finding, error) {
-	tmpl := `{{ include ".aliases.private.toml.age" | decrypt | fromToml | toJson }}`
-	b, err := l.Real.Execute(ctx, nil, []byte(tmpl), false)
-	if err != nil {
-		return nil, err
-	}
-	var private map[string]any
-	if err = json.Unmarshal(b, &private); err != nil {
-		return nil, fmt.Errorf("decode private aliases: %w", err)
-	}
-	var out []finding.Finding
-	for _, f := range aliasreg.Validate(private) {
-		out = append(out, finding.New("private "+f.Where, "%s", f.Message))
-	}
-	return out, nil
-}
-
-func ageIdentity(data map[string]any) string {
-	c, _ := data["chezmoi"].(map[string]any)
-	cfg, _ := c["config"].(map[string]any)
-	age, _ := cfg["age"].(map[string]any)
-	id, _ := age["identity"].(string)
-	return id
+	return aliasreg.Validate(data), nil
 }
 
 func (l Linter) packages(ctx context.Context) ([]finding.Finding, error) {
@@ -244,7 +203,7 @@ func (l Linter) templateFiles() ([]string, error) {
 		if err != nil {
 			return fmt.Errorf("read %s: %w", rel, err)
 		}
-		if callsSecret(b) {
+		if callsSecret(l.Src, b) {
 			return nil
 		}
 		out = append(out, rel)
@@ -314,11 +273,38 @@ var (
 		`|pass|passFields|passRaw|passhole|vault|secret|secretJSON|azureKeyVault|keyring|decrypt)\b`)
 )
 
-// callsSecret reports whether a template action calls a secret or decrypt function.
-func callsSecret(tmpl []byte) bool {
+// partialRef matches the string-literal name of a `template` or `includeTemplate`
+// call inside an action. Calls whose name is not a literal (a variable, a printf) are
+// not followed.
+var partialRef = regexp.MustCompile("\\b(?:template|includeTemplate)\\s+(?:\"([^\"]+)\"|`([^`]+)`)")
+
+// callsSecret reports whether a template calls a secret or decrypt function, in its
+// own actions or in any partial under src's .chezmoitemplates it reaches, transitively.
+func callsSecret(src string, tmpl []byte) bool {
+	return reachesSecret(src, tmpl, map[string]bool{})
+}
+
+// reachesSecret is callsSecret with the set of partials already visited, which guards
+// against cycles.
+func reachesSecret(src string, tmpl []byte, seen map[string]bool) bool {
 	for _, a := range templateAction.FindAll(tmpl, -1) {
-		if secretFunc.Match(a[2 : len(a)-2]) {
+		body := a[2 : len(a)-2]
+		if secretFunc.Match(body) {
 			return true
+		}
+		for _, m := range partialRef.FindAllSubmatch(body, -1) {
+			name := string(m[1]) + string(m[2])
+			if seen[name] || !filepath.IsLocal(filepath.FromSlash(name)) {
+				continue
+			}
+			seen[name] = true
+			b, err := os.ReadFile(filepath.Join(src, ".chezmoitemplates", filepath.FromSlash(name))) //nolint:gosec // name is checked local
+			if err != nil {
+				continue // a missing partial calls nothing
+			}
+			if reachesSecret(src, b, seen) {
+				return true
+			}
 		}
 	}
 	return false
