@@ -35,6 +35,8 @@ const (
 	rolePersonal = "personal"
 	roleWork     = "work"
 	roleLight    = "light"
+
+	chezmoiKey = "chezmoi"
 )
 
 // All returns every configuration, OS-major.
@@ -367,7 +369,11 @@ func Build(ctx context.Context, cz *chez.Client, src, scratch string) ([]Entry, 
 		}
 		data[role] = got
 	}
-	uniform(data)
+	machine, err := cz.ConfigData(ctx)
+	if err != nil {
+		return nil, err
+	}
+	uniform(data, machine)
 	var entries []Entry
 	for _, c := range All() {
 		o := chez.Overrides(data[c.Role]).Clone(chez.Overrides{"chezmoi": map[string]any{"os": c.OS}})
@@ -376,15 +382,22 @@ func Build(ctx context.Context, cz *chez.Client, src, scratch string) ([]Entry, 
 	return entries, nil
 }
 
-// uniform gives every role the union of the roles' keys: a role missing a key gets
-// the zero value of the type another role has for it.
-func uniform(data map[string]map[string]any) {
+// uniform gives every role the union of the roles' keys and of this machine's config
+// data (minus chezmoi's own): a role missing a key gets the zero value of the type
+// another role, or the machine, has for it, so nothing from the machine's config
+// reaches a configuration the roles do not render.
+func uniform(data map[string]map[string]any, machine map[string]any) {
 	zeros := map[string]any{}
 	for _, role := range Roles() {
 		for k, v := range data[role] {
 			if _, ok := zeros[k]; !ok {
 				zeros[k] = zeroOf(v)
 			}
+		}
+	}
+	for k, v := range machine {
+		if _, ok := zeros[k]; !ok && k != chezmoiKey {
+			zeros[k] = zeroOf(v)
 		}
 	}
 	for _, d := range data {

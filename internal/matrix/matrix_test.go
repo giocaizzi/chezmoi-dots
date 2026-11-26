@@ -215,8 +215,9 @@ func TestUniform(t *testing.T) {
 		"work":     {"tools": []any{"b"}},
 		"light":    {},
 	}
-	uniform(data)
-	want := map[string]any{"tools": []any{}, "on": false, "n": float64(0), "s": "", "m": map[string]any{}}
+	machine := map[string]any{"tools": []any{"z"}, "machineOnly": "x", "machineList": []any{"y"}, "chezmoi": map[string]any{"os": "linux"}}
+	uniform(data, machine)
+	want := map[string]any{"tools": []any{}, "on": false, "n": float64(0), "s": "", "m": map[string]any{}, "machineOnly": "", "machineList": []any{}}
 	if diff := cmp.Diff(want, data["light"]); diff != "" {
 		t.Errorf("light (-want +got):\n%s", diff)
 	}
