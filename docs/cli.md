@@ -291,7 +291,7 @@ Environment: `XDG_CONFIG_HOME` (default `~/.config`) locates
 read under `~/.oh-my-zsh/plugins`. Apply your dotfiles first so rendered aliases
 exist. If the rendered `shell/aliases.sh` does not exist, the `aliases` check
 prints `aliases: skipped, no rendered alias file <path> (see
-docs/alias-registry.md)` and exits 0 without probing shells, so a plain
+chezmoi dots help audit)` and exits 0 without probing shells, so a plain
 `chezmoi dots audit` continues to `secrets`; any other read error fails the
 check. If `shell/omz-aliases.zsh` is missing or unreadable, the check prints
 `aliases: note: <path> not read (<reason>); Oh My Zsh plugin aliases not included`

@@ -81,7 +81,7 @@ bash: aliases not in the registry:
 Unaccounted aliases make the check exit 1.
 
 If `shell/aliases.sh` does not exist, the check prints `aliases: skipped, no
-rendered alias file <path> (see docs/alias-registry.md)` and exits 0 without
+rendered alias file <path> (see chezmoi dots help audit)` and exits 0 without
 probing shells, so a plain `chezmoi dots audit` continues to the `secrets` check.
 Any other read error fails the check. If `shell/omz-aliases.zsh` is missing or
 unreadable, the check prints `aliases: note: <path> not read (<reason>); Oh My

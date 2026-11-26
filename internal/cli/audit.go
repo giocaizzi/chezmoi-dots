@@ -148,7 +148,7 @@ func (d Deps) knownAliases() (map[string]bool, error) {
 	aliasFile := filepath.Join(shellDir, "aliases.sh")
 	rendered, err := os.ReadFile(aliasFile) //nolint:gosec // the rendered alias file in the user's config dir
 	if errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(d.Stdout, "aliases: skipped, no rendered alias file %s (see docs/alias-registry.md)\n", aliasFile)
+		fmt.Fprintf(d.Stdout, "aliases: skipped, no rendered alias file %s (see chezmoi dots help audit)\n", aliasFile)
 		return nil, errNoRenderedAliases
 	}
 	if err != nil {
