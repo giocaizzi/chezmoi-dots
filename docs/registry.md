@@ -243,6 +243,6 @@ On macOS arm64 with `gui = true` in the `[data]` of the chezmoi config, renderin
     checksum.sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
 ```
 
-and `chezmoi dots pkg status --offline` lists `example-tool` under pinned releases, `example-lint` and `example-viewer` under Homebrew. With `light = true` nothing is selected: the release and `example-lint` are for `personal` and `work`, and the viewer needs `gui`. `chezmoi dots lint packages` passes, and `chezmoi dots pkg add example-cli --brew --dry-run` prints `[package.example-cli]` with `brew = "example-cli"`.
+and `chezmoi dots pkg status --offline` lists `example-tool` under pinned releases, `example-lint` and `example-viewer` under Homebrew. With `light = true` and no `gui` answer (or `gui = false`), nothing is selected: the release and `example-lint` are for `personal` and `work`, and the viewer needs `gui`. With `light = true` and `gui = true`, only `example-viewer` is selected, since it sets no `roles`. `chezmoi dots lint packages` passes, and `chezmoi dots pkg add example-cli --brew --dry-run` prints `[package.example-cli]` with `brew = "example-cli"`.
 
 To try a registry without touching your machine, point `HOME`, the `XDG_*` variables, `CHEZMOI_SOURCE_DIR` and `CHEZMOI_CONFIG_FILE` at a scratch directory, and give plain `chezmoi` the matching `--source`, `--config` and `--destination` flags.
