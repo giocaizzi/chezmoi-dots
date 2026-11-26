@@ -289,10 +289,13 @@ aliases make the check fail. Options: only `-h`, `--help`.
 Environment: `XDG_CONFIG_HOME` (default `~/.config`) locates
 `shell/aliases.sh` and optional `shell/omz-aliases.zsh`. Plugin definitions are
 read under `~/.oh-my-zsh/plugins`. Apply your dotfiles first so rendered aliases
-exist: a missing `shell/aliases.sh` fails the check with exit 1 (`read the
-rendered aliases (chezmoi apply?)`), and because that is an error rather than a
-finding, a plain `chezmoi dots audit` stops there and the `secrets` check does
-not run. Interactive shell startup files affect the aliases observed.
+exist. If the rendered `shell/aliases.sh` does not exist, the `aliases` check
+prints `aliases: skipped, no rendered alias file <path> (see
+docs/alias-registry.md)` and exits 0 without probing shells, so a plain
+`chezmoi dots audit` continues to `secrets`; any other read error fails the
+check. If `shell/omz-aliases.zsh` is missing or unreadable, the check prints
+`aliases: note: <path> not read (<reason>); Oh My Zsh plugin aliases not included`
+and continues. Interactive shell startup files affect the aliases observed.
 
 The `secrets` check probes, read-only, the secret-manager CLIs declared in
 `.chezmoidata/secrets.toml` (`bws`, `bw`, `rbw`) and prints a table

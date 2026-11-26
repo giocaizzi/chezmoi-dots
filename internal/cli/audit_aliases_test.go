@@ -92,11 +92,55 @@ func TestAuditAliases(t *testing.T) {
 			t.Errorf("stdout does not list zz under the registry heading:\n%s", out)
 		}
 	})
-	t.Run("a missing rendered alias file is an error, not a finding", func(t *testing.T) {
+	t.Run("a missing rendered alias file is skipped", func(t *testing.T) {
 		t.Parallel()
-		_, err := runAuditAliases(t, aliasConfig(t, false), aliasShells{}, bothShells)
-		if err == nil || errors.Is(err, cli.ErrReported) || !strings.Contains(err.Error(), "chezmoi apply?") {
-			t.Fatalf("audit aliases = %v, want a read error suggesting chezmoi apply", err)
+		cfg := aliasConfig(t, false)
+		out, err := runAuditAliases(t, cfg, aliasShells{}, bothShells)
+		if err != nil {
+			t.Fatalf("audit aliases = %v, want nil", err)
+		}
+		want := "aliases: skipped, no rendered alias file " + filepath.Join(cfg, "shell", "aliases.sh") + " (see docs/alias-registry.md)\n"
+		if out != want {
+			t.Errorf("stdout = %q, want %q", out, want)
+		}
+	})
+}
+
+func TestAuditAliasesOmzNote(t *testing.T) {
+	t.Parallel()
+	t.Run("a missing omz file is noted", func(t *testing.T) {
+		t.Parallel()
+		cfg := aliasConfig(t, true)
+		out, err := runAuditAliases(t, cfg, aliasShells{"zsh": "ll\n", "bash": "ll\n"}, bothShells)
+		if err != nil {
+			t.Fatalf("audit aliases = %v", err)
+		}
+		want := "aliases: note: " + filepath.Join(cfg, "shell", "omz-aliases.zsh") + " not read (missing); Oh My Zsh plugin aliases not included\n"
+		if !strings.Contains(out, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, out)
+		}
+	})
+	t.Run("an unreadable omz file is noted with the error", func(t *testing.T) {
+		t.Parallel()
+		if runtime.GOOS == "windows" {
+			t.Skip("file modes do not make a file unreadable on Windows")
+		}
+		cfg := aliasConfig(t, true)
+		omz := filepath.Join(cfg, "shell", "omz-aliases.zsh")
+		if err := os.WriteFile(omz, []byte("plugins=(git)\n"), 0o000); err != nil {
+			t.Fatal(err)
+		}
+		if f, err := os.Open(omz); err == nil {
+			_ = f.Close()
+			t.Skip("file modes are not enforced for this user")
+		}
+		out, err := runAuditAliases(t, cfg, aliasShells{"zsh": "ll\n", "bash": "ll\n"}, bothShells)
+		if err != nil {
+			t.Fatalf("audit aliases = %v", err)
+		}
+		if !strings.Contains(out, "aliases: note: "+omz+" not read (") || strings.Contains(out, "(missing)") ||
+			!strings.Contains(out, "); Oh My Zsh plugin aliases not included") {
+			t.Errorf("stdout lacks the unreadable note:\n%s", out)
 		}
 	})
 }
@@ -121,5 +165,22 @@ func TestAuditAliasesBashWithoutAliases(t *testing.T) {
 	}
 	if !strings.Contains(out, "bash: all aliases accounted for") {
 		t.Errorf("stdout lacks the bash line:\n%s", out)
+	}
+}
+
+// A missing rendered alias file skips the aliases check without stopping a plain audit.
+func TestAuditContinuesToSecretsWithoutAliases(t *testing.T) {
+	t.Parallel()
+	e := secretsEnv(t, "")
+	cfg := t.TempDir()
+	e.vars["XDG_CONFIG_HOME"] = cfg
+	stdout, stderr, err := e.runWith(t, &secretRunner{}, "audit")
+	if err != nil {
+		t.Fatalf("audit = %v\n%s", err, stderr)
+	}
+	for _, want := range []string{"aliases: skipped, no rendered alias file", "secrets: no entries declared"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
 	}
 }
