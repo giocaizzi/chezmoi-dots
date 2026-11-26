@@ -37,7 +37,7 @@ func (e *env) isolate(t *testing.T) {
 	t.Helper()
 	dir := filepath.Join(filepath.Dir(e.src), "cfg")
 	cfg := "destDir = " + quote(e.dest) + "\npersistentState = " + quote(filepath.Join(dir, "state.boltdb")) +
-		"\n[data]\n    work = false\n    light = false\n    harnesses = []\n"
+		"\n[data]\n    work = false\n    light = false\n    tools = []\n"
 	e.vars["CHEZMOI_CONFIG_FILE"] = e.file(t, dir, "chezmoi.toml", cfg)
 }
 

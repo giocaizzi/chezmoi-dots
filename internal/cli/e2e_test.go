@@ -357,3 +357,30 @@ func TestLintTemplatesVariant(t *testing.T) {
 		t.Errorf("lint templates = %v, stderr %q, want findings for the work variant only", err, stderr)
 	}
 }
+
+// Review findings on the generic matrix, reproduced against real chezmoi. Each
+// subtest is an x-failure: remove its t.Skip once the source is fixed.
+func TestMatrixReviewXFail(t *testing.T) {
+	t.Parallel()
+	// A [data] key this machine's config holds but no role's render writes (a feature
+	// sub-answer, a key an older template wrote) reaches every configuration of view
+	// and edit, which render over this machine's config.
+	t.Run("xfail: a key only this machine's config holds leaks into view --as", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: matrix.Build overrides only the keys some role renders; view/edit render over the real config")
+		e := newEnv(t)
+		cfg := e.vars["CHEZMOI_CONFIG_FILE"]
+		b, err := os.ReadFile(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(cfg, append(b, "    machineOnly = \"from-this-machine\"\n"...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		e.writeFile(t, "dot_probe.tmpl", "probe={{ get . \"machineOnly\" | default \"none\" }}\n")
+		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".probe"), "--as", "linux,work")
+		if err != nil || strings.Contains(out, "from-this-machine") {
+			t.Errorf("view --as linux,work = %q, %v, want no value from this machine's config", out, err)
+		}
+	})
+}
