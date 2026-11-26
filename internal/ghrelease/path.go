@@ -82,24 +82,15 @@ func matchesName(base string, names []string, windows bool) bool {
 }
 
 // templatePath drops a windows ".exe" and replaces the version and the target's
-// value, where whole tokens, by their placeholders. A target value that ends in an
-// archive extension is also tried without it.
+// full registry value, where whole tokens, by their placeholders. {target} always
+// expands to the whole value, archive extension included, so a directory named
+// without that extension is left as it is.
 func templatePath(file string, p Proposal, target string, windows bool) string {
 	if windows && len(file) >= len(extExe) && strings.EqualFold(file[len(file)-len(extExe):], extExe) {
 		file = file[:len(file)-len(extExe)]
 	}
 	file = templVersionSep(file, p.Version, 0, len(file), pathSeparators)
-	if got := replaceToken(file, target, "{target}"); got != file {
-		return got
-	}
-	// A target value spans the asset's extension when the targets' extensions differ
-	// (linux_amd64.tar.gz, windows_amd64.zip); a directory inside carries none of it.
-	for _, ext := range []string{extTarGz, extTgz, extTarXz, extZip} {
-		if v, ok := strings.CutSuffix(target, ext); ok {
-			return replaceToken(file, v, "{target}")
-		}
-	}
-	return file
+	return replaceToken(file, target, "{target}")
 }
 
 // replaceToken replaces value in s by repl where value is a whole token: bounded by

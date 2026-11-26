@@ -485,10 +485,12 @@ download that fails stops the command with nothing written. A target's candidate
 are its executable files whose name is the entry name or the repository name (on
 windows `<name>.exe`, any case); a file in an archive that records no modes counts
 as executable. When every listed target has exactly one candidate and they are the
-same path once the version and the target's value are replaced by `{version}` and
+same path once the version and the target's full value are replaced by `{version}` and
 `{target}` where they are whole tokens, that is the `path` (for example
-`tool_{version}_{target}/tool`; never with `.exe`). Otherwise the `path` stays the
-repository name. A `.tar.xz` archive is not listed, and targets with one are left out
+`tool_{version}/bin/tool`; never with `.exe`). `{target}` always stands for the whole
+registry value, archive extension included: with extension-carrying values
+(`linux_amd64.tar.gz`) a directory like `tool_1.2.3_linux_amd64` is not settled and is
+reported as not found. Otherwise the `path` stays the repository name. A `.tar.xz` archive is not listed, and targets with one are left out
 of the check; an archive that cannot be read counts the same.
 
 The proposal goes to stderr: `version`, `url`, `type`, `path`, `exe`, each target

@@ -51,7 +51,21 @@ func TestProposePath(t *testing.T) {
 				"linux/amd64":   exe("tool_1.2.3_linux_amd64/tool"),
 				"windows/amd64": exe("tool_1.2.3_windows_amd64/tool.exe"),
 			},
-			wantPath: "tool_{version}_{target}/tool", wantOK: true,
+			wantCands: map[string][]string{
+				"linux/amd64": {"tool_1.2.3_linux_amd64/tool"}, "windows/amd64": {"tool_1.2.3_windows_amd64/tool.exe"},
+			},
+			candidates: true,
+		},
+		{
+			name: "target values carry the extension and the directory holds the full value",
+			p: Proposal{Version: "1.2.3", Targets: map[string]string{
+				"linux/amd64": "linux_amd64.tar.gz", "windows/amd64": "windows_amd64.zip",
+			}},
+			files: map[string][]archive.File{
+				"linux/amd64":   exe("linux_amd64.tar.gz/tool"),
+				"windows/amd64": exe("windows_amd64.zip/tool.exe"),
+			},
+			wantPath: "{target}/tool", wantOK: true,
 		},
 		{
 			name: "flat archives",
@@ -176,7 +190,6 @@ func TestProposePathRendersToTheListedFile(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name  string
-		xfail string
 		p     Proposal
 		files map[string][]archive.File
 	}{
@@ -188,24 +201,16 @@ func TestProposePathRendersToTheListedFile(t *testing.T) {
 			},
 		},
 		{
-			name:  "target values carry the archive extension",
-			xfail: "templatePath writes {target} for the value without its extension, which {target} never expands to",
-			p:     Proposal{Version: "1.2.3", Targets: map[string]string{"linux/amd64": "linux_amd64.tar.gz", "windows/amd64": "windows_amd64.zip"}},
+			name: "target values carry the archive extension",
+			p:    Proposal{Version: "1.2.3", Targets: map[string]string{"linux/amd64": "linux_amd64.tar.gz", "windows/amd64": "windows_amd64.zip"}},
 			files: map[string][]archive.File{
 				"linux/amd64": exe("tool_1.2.3_linux_amd64/tool"), "windows/amd64": exe("tool_1.2.3_windows_amd64/tool.exe"),
 			},
 		},
 	}
 	for _, tt := range tests {
-		name := tt.name
-		if tt.xfail != "" {
-			name = "xfail: " + name
-		}
-		t.Run(name, func(t *testing.T) {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.xfail != "" {
-				t.Skip("xfail: " + tt.xfail)
-			}
 			got, ok, _ := ProposePath([]string{"tool"}, tt.p, tt.files)
 			if !ok {
 				return // an unsettled path makes no promise
