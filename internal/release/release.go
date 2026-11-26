@@ -256,7 +256,9 @@ func (f Finder) Sums(ctx context.Context, r pkgreg.Release, version string) (map
 // Inspect downloads version of r for every platform once and returns the checksums
 // and, for the platforms whose archive is a .tar.gz, .tgz or .zip, the regular files
 // inside it. files[platform] is nil when the archive is of another kind or cannot be
-// read; the checksum is of the whole download either way.
+// read, including one over the archive package's limits (name length, decompressed
+// size, zip spool size); the checksum is of the whole download either way, because
+// fetch drains the body after the listing stops. Zips are spooled one at a time.
 func (f Finder) Inspect(ctx context.Context, r pkgreg.Release, version string) (sums map[string]string, files map[string][]archive.File, err error) {
 	return f.inspect(ctx, r, version, true)
 }

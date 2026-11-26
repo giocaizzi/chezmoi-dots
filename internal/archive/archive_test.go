@@ -5,11 +5,14 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -308,5 +311,107 @@ func TestListCapsDecompressedStream(t *testing.T) {
 	got, err := archive.ListLimits(archive.TarGz, bytes.NewReader(buf.Bytes()), l)
 	if err != nil || len(got) != 1 {
 		t.Errorf("ListLimits under the cap = %v, %v; want one file", got, err)
+	}
+}
+
+func TestListZipLimits(t *testing.T) {
+	t.Parallel()
+	data := zipBytes(t, []entry{{name: "d/tool", mode: 0o755}, {name: "d/other", mode: 0o644}}, true)
+	t.Run("a zip over the spool cap is not listed", func(t *testing.T) {
+		t.Parallel()
+		l := archive.DefaultLimits()
+		l.MaxZipSpool = int64(len(data)) - 1
+		files, err := archive.ListLimits(archive.Zip, bytes.NewReader(data), l)
+		if !errors.Is(err, archive.ErrTooLarge) || files != nil {
+			t.Errorf("ListLimits = %v, %v; want nil, %v", files, err, archive.ErrTooLarge)
+		}
+		// An endless body must stop at the cap instead of filling the disk.
+		l.MaxZipSpool = 1 << 10
+		endless := readerFunc(func(p []byte) (int, error) { return len(p), nil })
+		if _, err := archive.ListLimits(archive.Zip, endless, l); !errors.Is(err, archive.ErrTooLarge) {
+			t.Errorf("ListLimits of an endless body = %v, want %v", err, archive.ErrTooLarge)
+		}
+		l.MaxZipSpool = int64(len(data)) - 1
+		l.MaxZipSpool = int64(len(data))
+		if files, err := archive.ListLimits(archive.Zip, bytes.NewReader(data), l); err != nil || len(files) != 2 {
+			t.Errorf("ListLimits at the cap = %v, %v; want 2 files", files, err)
+		}
+	})
+	t.Run("a central directory over the cap is refused", func(t *testing.T) {
+		t.Parallel()
+		l := archive.DefaultLimits()
+		l.MaxCentralDir = 10
+		if _, err := archive.ListLimits(archive.Zip, bytes.NewReader(data), l); !errors.Is(err, archive.ErrTooLarge) {
+			t.Errorf("ListLimits = %v, want %v", err, archive.ErrTooLarge)
+		}
+	})
+	t.Run("a declared central directory size is checked before it is read", func(t *testing.T) {
+		t.Parallel()
+		forged := bytes.Clone(data)
+		eocd := bytes.LastIndex(forged, []byte("PK\x05\x06"))
+		binary.LittleEndian.PutUint32(forged[eocd+12:], 1<<30) // the real directory is a few hundred bytes
+		// zip.NewReader would reject this as malformed; ErrTooLarge shows the check ran first.
+		if _, err := archive.List(archive.Zip, bytes.NewReader(forged)); !errors.Is(err, archive.ErrTooLarge) {
+			t.Errorf("List = %v, want %v", err, archive.ErrTooLarge)
+		}
+	})
+	t.Run("not a zip", func(t *testing.T) {
+		t.Parallel()
+		if _, err := archive.List(archive.Zip, bytes.NewReader([]byte("x"))); !errors.Is(err, zip.ErrFormat) {
+			t.Errorf("List = %v, want %v", err, zip.ErrFormat)
+		}
+	})
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
+
+// gateReader serves its data in two reads and makes the second wait for release.
+type gateReader struct {
+	data    []byte
+	started chan struct{} // closed on the first Read
+	release chan struct{} // the second Read waits on it
+	reads   int
+}
+
+func (g *gateReader) Read(p []byte) (int, error) {
+	g.reads++
+	switch g.reads {
+	case 1:
+		close(g.started)
+		return copy(p, g.data[:1]), nil
+	case 2:
+		<-g.release
+		return copy(p, g.data[1:]), nil
+	}
+	return 0, io.EOF
+}
+
+func TestListSpoolsOneZipAtATime(t *testing.T) {
+	t.Parallel()
+	data := zipBytes(t, []entry{{name: "tool", mode: 0o755}}, true)
+	first := &gateReader{data: data, started: make(chan struct{}), release: make(chan struct{})}
+	second := &gateReader{data: data, started: make(chan struct{}), release: make(chan struct{})}
+	close(second.release)
+	done := make(chan error, 2)
+	go func() { _, err := archive.List(archive.Zip, first); done <- err }()
+	<-first.started
+	go func() { _, err := archive.List(archive.Zip, second); done <- err }()
+	select {
+	case <-second.started:
+		t.Fatal("a second zip started spooling while the first was still spooling")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(first.release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Errorf("List = %v", err)
+		}
+	}
+	select {
+	case <-second.started:
+	default:
+		t.Error("the second zip never spooled")
 	}
 }
