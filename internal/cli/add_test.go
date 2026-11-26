@@ -422,3 +422,30 @@ func TestAddRestoresRegistryWhenChezmoiAddFails(t *testing.T) {
 		})
 	}
 }
+
+func TestAddWithoutDescOffATerminalIsAUsageError(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.isolate(t)
+	target := e.file(t, e.dest, ".nodesc", "x\n")
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = null.Close() })
+	var out, errw bytes.Buffer
+	d := cli.Deps{
+		Getenv: func(k string) string { return e.vars[k] },
+		Stdin:  null, Stdout: &out, Stderr: &errw,
+		Runner: sandboxRunner{sandboxEnv(e.sandbox)}, LookPath: exec.LookPath,
+		GOOS: runtime.GOOS, Home: e.vars["HOME"], Version: "test",
+	}
+	err = cli.Run(t.Context(), d, []string{"add", target})
+	const want = "--desc is required when stdin is not a terminal"
+	if !errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), want) {
+		t.Errorf("add = %v, want a usage error containing %q", err, want)
+	}
+	if strings.Contains(errw.String(), "Description for") {
+		t.Errorf("a prompt was written:\n%s", errw.String())
+	}
+}

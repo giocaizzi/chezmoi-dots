@@ -11,6 +11,9 @@ OPTIONS
   -h, --help  Show this help and exit successfully.
 
 ENVIRONMENT
+  CHEZMOI_EXECUTABLE  chezmoi executable (default: chezmoi).
+  CHEZMOI_CONFIG_FILE  chezmoi config file (default: chezmoi's config).
+  CHEZMOI_SOURCE_DIR  source directory (default: ask chezmoi; honors .chezmoiroot).
   XDG_CONFIG_HOME  config directory (default: ~/.config).
   Reads shell/aliases.sh and shell/omz-aliases.zsh there, and ~/.oh-my-zsh/plugins.
 

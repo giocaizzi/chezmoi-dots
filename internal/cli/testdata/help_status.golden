@@ -1,0 +1,22 @@
+chezmoi dots status — Dotfiles repository and apply status
+
+USAGE
+  chezmoi dots status [options]
+
+ARGUMENTS
+  None. Shows the dotfiles git checkout (branch, ahead/behind, local changes) and what chezmoi apply would change. No network access unless --fetch.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+  --check  exit non-zero when the dotfiles are not in sync (default: "false")
+  --fetch  git fetch the dotfiles first (default: "false")
+
+ENVIRONMENT
+  CHEZMOI_EXECUTABLE  chezmoi executable (default: chezmoi).
+  CHEZMOI_CONFIG_FILE  chezmoi config file (default: chezmoi's config).
+  CHEZMOI_SOURCE_DIR  source directory (default: ask chezmoi; honors .chezmoiroot).
+  CHEZMOI_WORKING_TREE  dotfiles working tree (default: ask chezmoi).
+
+EXAMPLES
+  chezmoi dots status
+  chezmoi dots status --fetch --check

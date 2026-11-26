@@ -56,7 +56,7 @@ func (s *helpTrap) deps(out, errw *bytes.Buffer) cli.Deps {
 
 func TestLocalHelp(t *testing.T) {
 	t.Parallel()
-	pages := [][]string{nil, {"edit"}, {"add"}, {"view"}, {"list"}, {"status"}, {"lint"}, {"audit"}, {"secrets"}, {"secrets", "run"}, {"pkg"}, {"pkg", "status"}, {"pkg", "bump"}, {"upgrade"}, {"version"}, {"help"}, {"live"}}
+	pages := [][]string{nil, {"edit"}, {"add"}, {"view"}, {"list"}, {"status"}, {"lint"}, {"audit"}, {"secrets"}, {"secrets", "run"}, {"pkg"}, {"pkg", "status"}, {"pkg", "bump"}, {"pkg", "add"}, {"upgrade"}, {"version"}, {"help"}, {"live"}}
 	for _, page := range pages {
 		t.Run(strings.Join(page, "/"), func(t *testing.T) {
 			t.Parallel()
@@ -121,8 +121,8 @@ func TestHelpContent(t *testing.T) {
 		{[]string{"add"}, []string{"ARGUMENTS", "ENVIRONMENT", "--name", "--desc", "--template", "--encrypt", "--local", "CHEZMOI_SOURCE_DIR"}, []string{"COMMANDS"}},
 		{[]string{"status"}, []string{"ARGUMENTS", "ENVIRONMENT", "--fetch", "--check", "CHEZMOI_WORKING_TREE"}, []string{"COMMANDS"}},
 		{[]string{"view"}, []string{"ARGUMENTS", "ENVIRONMENT", "--as", "--matrix", "CHEZMOI_SOURCE_DIR"}, []string{"--all"}},
-		{[]string{"lint"}, []string{"ARGUMENTS", "registry", "aliases", "packages", "matrix", "templates"}, []string{"COMMANDS"}},
-		{[]string{"audit"}, []string{"ARGUMENTS", "aliases", "ENVIRONMENT", "XDG_CONFIG_HOME"}, []string{"COMMANDS"}},
+		{[]string{"lint"}, []string{"ARGUMENTS", "registry", "aliases", "packages", "secrets", "matrix", "templates"}, []string{"COMMANDS"}},
+		{[]string{"audit"}, []string{"ARGUMENTS", "aliases", "ENVIRONMENT", "XDG_CONFIG_HOME", "CHEZMOI_SOURCE_DIR"}, []string{"COMMANDS"}},
 		{[]string{"secrets"}, []string{"COMMANDS", "run", "ARGUMENTS", "ENVIRONMENT"}, nil},
 		{[]string{"secrets", "run"}, []string{"ARGUMENTS", "--timeout", "--", "BWS_ACCESS_TOKEN", "ENVIRONMENT", "EXAMPLES"}, []string{"COMMANDS"}},
 		{[]string{"pkg"}, []string{"COMMANDS", "status", "bump"}, nil},
@@ -297,7 +297,7 @@ func TestHelpTokensRetainParserMeaning(t *testing.T) {
 
 func TestUsageReportsLocalHelpOnce(t *testing.T) {
 	t.Parallel()
-	for _, args := range [][]string{{"edit", "a", "b"}, {"list", "pattern"}, {"view", "--unknown"}, {"view", "--unknown", "--help"}, {"lint", "--unknown"}, {"pkg"}, {"pkg", "nosuch"}, {"pkg", "status", "extra"}, {"pkg", "bump", "--unknown"}, {"audit", "other"}, {"secrets", "nosuch"}, {"secrets", "run"}, {"secrets", "run", "--bogus"}, {"view", "--all"}, {"upgrade", "--unknown"}, {"live", "--unknown"}} {
+	for _, args := range [][]string{{"edit", "a", "b"}, {"list", "pattern"}, {"view", "--unknown"}, {"view", "--unknown", "--help"}, {"lint", "--unknown"}, {"pkg"}, {"pkg", "nosuch"}, {"pkg", "status", "extra"}, {"pkg", "bump", "--unknown"}, {"audit", "other"}, {"secrets", "nosuch"}, {"secrets", "run"}, {"secrets", "run", "--bogus"}, {"view", "--all"}, {"upgrade", "--unknown"}, {"live", "--unknown"}, {"upgrade", "nosuch"}, {"audit", "--unknown"}, {"status", "extra"}, {"add"}} {
 		t.Run(strings.Join(args, "/"), func(t *testing.T) {
 			t.Parallel()
 			var out, errw bytes.Buffer
@@ -318,7 +318,7 @@ func TestUsageReportsLocalHelpOnce(t *testing.T) {
 
 func TestHelpGoldens(t *testing.T) {
 	t.Parallel()
-	for _, page := range []string{"root", "audit", "view", "secrets", "secrets run", "pkg", "pkg add", "live"} {
+	for _, page := range []string{"root", "edit", "add", "view", "list", "status", "upgrade", "lint", "audit", "secrets", "secrets run", "pkg", "pkg status", "pkg bump", "pkg add", "version", "help", "live"} {
 		t.Run(page, func(t *testing.T) {
 			t.Parallel()
 			args := []string{"help"}

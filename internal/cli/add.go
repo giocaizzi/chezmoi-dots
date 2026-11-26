@@ -350,16 +350,11 @@ func localFolder(p string) (string, error) {
 
 // askDesc prompts for a description on a terminal; elsewhere --desc is required.
 func (d Deps) askDesc(ctx context.Context, name string) (string, error) {
-	f, ok := d.Stdin.(*os.File)
-	if !ok {
-		return "", fmt.Errorf("%w: --desc is required when stdin is not a terminal", ErrUsage)
-	}
-	info, err := f.Stat()
-	if err != nil || info.Mode()&fs.ModeCharDevice == 0 {
+	if !d.interactive() {
 		return "", fmt.Errorf("%w: --desc is required when stdin is not a terminal", ErrUsage)
 	}
 	_, _ = fmt.Fprintf(d.Stderr, "Description for %s: ", name)
-	line, err := readLine(ctx, f)
+	line, err := readLine(ctx, d.Stdin)
 	if err != nil {
 		return "", err
 	}
