@@ -185,7 +185,8 @@ chezmoi dots list
 chezmoi dots lint [<check>...]
 ```
 
-Checks are `registry`, `aliases`, `packages`, `matrix`, `templates`. With none,
+Checks are `registry`, `aliases`, `packages` (the rules are in the
+[package registry](registry.md)), `matrix`, `templates`. With none,
 run all in that order; explicit arguments run in the supplied order. Findings
 and check summaries go to stderr. Matrix checks evaluate the OS/role
 configurations; template checks validate rendered files and available linters.
@@ -288,7 +289,9 @@ chezmoi dots pkg status [--offline] [--fetch] [--check]
 ```
 
 Survey tools on this machine, comparing installed versions, pins and upstream
-releases. No positional arguments. All options default to false:
+releases. The tools come from the [package registry](registry.md) through your
+dotfiles' `role`, `releases` and `packages` templates (see
+[what your dotfiles provide](registry.md#what-your-dotfiles-provide)). No positional arguments. All options default to false:
 
 - `--offline`: skip upstream release and archive HEAD lookups, `uv` and `npm` latest lookups and
   the Git fetch. For pinned npm packages (including the `npm view` lookup) the
@@ -343,7 +346,8 @@ chezmoi dots pkg status --fetch --check
 chezmoi dots pkg bump [--dry-run] [<pin>...]
 ```
 
-`<pin>` is a release name from `.chezmoidata/packages.toml` or an archive
+`<pin>` is a release name from `.chezmoidata/packages.toml` (see the
+[release table](registry.md#releases)) or an archive
 repository path (`octocat/example`); with no names, everything. Fetch newer
 upstream versions and checksums, then update the pins. It edits
 `.chezmoidata/packages.toml` and/or the externals files and never installs
