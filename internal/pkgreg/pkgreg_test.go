@@ -207,3 +207,29 @@ func TestSetReleaseLeavesVersionCmd(t *testing.T) {
 		t.Errorf("SetRelease() (-want +got):\n%s", diff)
 	}
 }
+
+func TestValidateRoles(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		roles    any
+		wantText string // substring of the findings; empty means valid
+	}{
+		{"any name", []any{"anything"}, ""},
+		{"empty name", []any{""}, "roles must be a list of non-empty names"},
+		{"not a list", "home", "roles must be a list of non-empty names"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			data := map[string]any{"package": map[string]any{"x": map[string]any{"brew": "x", "roles": tt.roles}}}
+			got := finding.Lines(Validate(data))
+			switch {
+			case tt.wantText == "" && got != "":
+				t.Errorf("Validate() = %q, want valid", got)
+			case !strings.Contains(got, tt.wantText):
+				t.Errorf("Validate() = %q, want it to contain %q", got, tt.wantText)
+			}
+		})
+	}
+}

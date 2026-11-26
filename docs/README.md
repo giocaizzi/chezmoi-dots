@@ -4,6 +4,7 @@ Source of truth for decisions, architecture and runbooks of this repo.
 
 - [Command reference](cli.md): arguments, options, defaults, environment and help/error semantics.
 - [Everyday workflow](workflow.md): daily check, editing, upgrades, pin updates, CI usage and migrating from 0.x command names.
+- [Matrix](matrix.md): OS x declared profiles, how their data is produced and the opt-in `matrix` declaration.
 - [Package registry](registry.md): the `.chezmoidata/packages.toml` schema, the templates `pkg status` renders, and a worked example.
 - [Release chezmoi-dots](release.md): runbook for tagging and publishing a version, verifying it, and bumping it in a dotfiles repository.
 - [Build and install locally](local-build-install.md): checks, build, optional installation, verification and rollback.

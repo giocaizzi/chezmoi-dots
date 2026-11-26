@@ -170,16 +170,11 @@ func TestPackageEntryLines(t *testing.T) {
 	}
 }
 
-func TestValidPlatformAndRole(t *testing.T) {
+func TestValidPlatform(t *testing.T) {
 	t.Parallel()
 	for p, want := range map[string]bool{"linux/amd64": true, "windows/arm64": true, "linux": false, "freebsd/amd64": false, "linux/386": false} {
 		if got := pkgreg.ValidPlatform(p); got != want {
 			t.Errorf("ValidPlatform(%q) = %v, want %v", p, got, want)
-		}
-	}
-	for r, want := range map[string]bool{"personal": true, "work": true, "light": true, "admin": false, "": false} {
-		if got := pkgreg.ValidRole(r); got != want {
-			t.Errorf("ValidRole(%q) = %v, want %v", r, got, want)
 		}
 	}
 }

@@ -21,7 +21,7 @@ const doneFile = "done"
 
 // LiveChezmoi is what the live view needs of chezmoi.
 type LiveChezmoi interface {
-	Dump(ctx context.Context, o chez.Overrides) (chez.State, error)
+	Dump(ctx context.Context, cfg string, o chez.Overrides) (chez.State, error)
 	Encrypt(ctx context.Context, plain []byte) ([]byte, error)
 }
 
@@ -100,7 +100,7 @@ func (l Live) sync(ctx context.Context) error {
 }
 
 func (l Live) render(ctx context.Context) (chez.State, error) {
-	st, err := l.CZ.Dump(ctx, nil)
+	st, err := l.CZ.Dump(ctx, "", nil)
 	if err != nil {
 		return nil, fmt.Errorf("render: %w", err)
 	}

@@ -85,6 +85,8 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      # The e2e tests skip when chezmoi is not on PATH: install a pinned, checksum-verified release.
+      - uses: ./.github/actions/setup-chezmoi
       # Windows runners have no GNU make: run the same command as `make check-fast`.
       - run: go test -shuffle=on ./...
 
@@ -135,4 +137,6 @@ jobs:
       #         or (.value.result == "skipped" and ($event == "pull_request" or $event == "push") and (.key | IN($f[])))
       #         or (.value.result == "skipped" and $gated[.key] != null and $changes[$gated[.key]] == "false"))' <<<"$RESULTS"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The e2e tests skip when chezmoi is not on PATH: install a pinned, checksum-verified release.
+      - uses: ./.github/actions/setup-chezmoi
       - run: make check

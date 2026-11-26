@@ -244,6 +244,28 @@ func TestPkgAddFlagForms(t *testing.T) {
 	}
 }
 
+func TestPkgAddRoles(t *testing.T) {
+	t.Parallel()
+	t.Run("empty role name", func(t *testing.T) {
+		t.Parallel()
+		e := newPkgAddEnv(t, pkgAddOldText, `{}`)
+		err := e.run(t, "wget", "--brew", "--roles", "home,")
+		if !errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), "non-empty names") {
+			t.Fatalf("pkg add = %v, want a usage error about the empty name", err)
+		}
+		if got := e.text(t); got != pkgAddOldText {
+			t.Errorf("a rejected command changed packages.toml:\n%s", got)
+		}
+	})
+	t.Run("any name", func(t *testing.T) {
+		t.Parallel()
+		e := newPkgAddEnv(t, pkgAddOldText, `{}`)
+		if err := e.run(t, "wget", "--brew", "--roles", "admin"); err != nil {
+			t.Fatalf("pkg add = %v, want it to pass", err)
+		}
+	})
+}
+
 func TestPkgAddUsageErrors(t *testing.T) {
 	t.Parallel()
 	const url = "https://example.com/{version}/tool-{target}.tar.gz"
@@ -255,7 +277,6 @@ func TestPkgAddUsageErrors(t *testing.T) {
 		{"two names", []string{"a", "b", "--brew"}},
 		{"bad name", []string{"a b", "--brew"}},
 		{"name with a dot", []string{"a.b", "--brew"}},
-		{"bad role", []string{"wget", "--brew", "--roles", "personal,admin"}},
 		{"empty role", []string{"wget", "--brew", "--roles", ""}},
 		{"empty requires", []string{"wget", "--brew", "--requires", ""}},
 		{"empty brew value", []string{"wget", "--brew="}},

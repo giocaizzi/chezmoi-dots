@@ -14,8 +14,6 @@ import (
 	"github.com/giocaizzi/chezmoi-dots/internal/finding"
 )
 
-func roles() []string { return []string{"personal", "work", "light"} }
-
 func installKeys() []string {
 	return []string{"brew", "cask", "apt", "winget", "uv", "npm", "az", "psmodule", "python", "ompFont", "script"}
 }
@@ -77,8 +75,8 @@ func validatePackage(n string, p map[string]any) []finding.Finding {
 func validateCommon(where string, t map[string]any) []finding.Finding {
 	var out []finding.Finding
 	bad := func(format string, args ...any) { out = append(out, finding.New(where, format, args...)) }
-	if r, ok := t["roles"]; ok && !subset(r, roles()) {
-		bad("roles must be a subset of %v", roles())
+	if r, ok := t["roles"]; ok && !rolesOK(r) {
+		bad("roles must be a list of non-empty names")
 	}
 	if r, ok := t["requires"]; ok && !nonEmptyString(r) {
 		bad("requires must name a [data] answer")
@@ -312,4 +310,19 @@ func sortedKeys(m map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// rolesOK reports whether v is a list of non-empty names.
+func rolesOK(v any) bool {
+	list, ok := v.([]any)
+	if !ok {
+		return false
+	}
+	for _, x := range list {
+		s, isStr := x.(string)
+		if !isStr || s == "" {
+			return false
+		}
+	}
+	return true
 }

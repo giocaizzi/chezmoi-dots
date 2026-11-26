@@ -147,22 +147,25 @@ chezmoi dots add ~/projects/notes --local --desc "Notes folder"
 ## view
 
 ```text
-chezmoi dots view [--as <os>[,<role>]] [--matrix] [<what>]
+chezmoi dots view [--as <os>[,<profile>]] [--matrix] [<what>]
 ```
 
 With one selector, show composition and the rendered target for this machine by
 default. `--as` renders one configuration: OS is `darwin`, `linux` or `windows`;
-role is `personal` (default), `work` or `light`. Both `linux,work` and
-`linux/work` are accepted. `--matrix` renders all nine configurations. With no
+profile is a profile declared in the matrix. Both `linux,home` and `linux/home`
+are accepted. The profile may be omitted only when exactly one profile exists;
+otherwise it is an error listing the profiles. `--matrix` renders every
+OS/profile configuration (3 x the number of profiles). With no
 selector, `--matrix` shows an overview across registry entries; without it a
-selector is required. `--as` cannot be combined with `--matrix`.
+selector is required. `--as` cannot be combined with `--matrix`. How each
+configuration's data is produced is described in [matrix.md](matrix.md).
 
 Options: `--as` (default empty/current machine), `--matrix` (false), `-h`,
 `--help`. Environment: shared chezmoi and output settings only.
 
 ```sh
 chezmoi dots view git
-chezmoi dots view git --as linux,work
+chezmoi dots view git --as linux,home
 chezmoi dots view --matrix
 ```
 
@@ -188,12 +191,13 @@ chezmoi dots lint [<check>...]
 Checks are `registry`, `aliases`, `packages` (the rules are in the
 [package registry](registry.md)), `matrix`, `templates`. With none,
 run all in that order; explicit arguments run in the supplied order. Findings
-and check summaries go to stderr. Matrix checks evaluate the OS/role
-configurations; template checks validate rendered files and available linters.
+and check summaries go to stderr. The `matrix` check validates the matrix declaration
+(see [matrix.md](matrix.md)); `templates` renders every shell, zsh,
+PowerShell and JSON template for every configuration and lints the result with
+the available linters (details in [matrix.md](matrix.md#template-linting)).
 
 Options: only `-h`, `--help`. Environment: shared chezmoi/output settings and
-`PATH` for external validators. Alias validation can use the age identity
-configured in chezmoi when available.
+`PATH` for external validators.
 
 ```sh
 chezmoi dots lint
@@ -518,8 +522,8 @@ sha256 tables; the checksums come from the same downloads, so the archives are n
 fetched twice. Bare binaries (`type = "file"`) have no `path` and are downloaded for
 the checksum only after the confirmation, as in release mode.
 
-`--roles` takes a comma list of `personal`, `work`, `light` and writes
-`roles = [...]`; `--requires <answer>` writes `requires = "<answer>"`. Both work
+`--roles` takes a comma list of non-empty role names, free-form names your
+templates define, and writes `roles = [...]`; `--requires <answer>` writes `requires = "<answer>"`. Both work
 in every mode. Package source flags with `--release`, release flags
 (`--version`, `--url`, `--target`) without it, a missing version, url or target in
 release mode, a bad name, role, target or url, and a name other than exactly one are
@@ -549,7 +553,7 @@ Environment: shared chezmoi and output settings; `GH_TOKEN` / `GITHUB_TOKEN` for
 chezmoi dots pkg add wget --brew --apt
 chezmoi dots pkg add wget            # ask this machine's package managers
 chezmoi dots pkg add wget --yes      # accept what they find, no prompt
-chezmoi dots pkg add example-app --cask example-app --roles personal,work
+chezmoi dots pkg add example-app --cask example-app --roles home
 chezmoi dots pkg add example-tool --release --version 1.2.3 \
   --url 'https://example.com/{version}/tool-{target}.tar.gz' \
   --target linux/amd64=linux-x86_64 --target darwin/arm64=macos-arm --dry-run

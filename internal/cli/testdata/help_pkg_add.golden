@@ -24,7 +24,7 @@ OPTIONS
   --npm  install with npm; --npm=<spec> when the spec differs from the name (default: "")
   --release  add a pinned release binary instead of a package (default: "false")
   --requires <answer>  install only when this [data] answer is set (default: "")
-  --roles <roles>  limit to roles (comma list of personal, work, light) (default: "")
+  --roles <roles>  limit to roles (comma list of role names your templates define) (default: "")
   --target <os/arch=name>  repeatable release os/arch=name target (default: "")
   --url <template>  release download template with {version} (and {target}) (default: "")
   --uv  install with uv tool; --uv=<spec> when the spec differs from the name (default: "")
@@ -41,6 +41,6 @@ ENVIRONMENT
 EXAMPLES
   chezmoi dots pkg add wget --brew --apt
   chezmoi dots pkg add wget
-  chezmoi dots pkg add example-app --cask example-app --roles personal
+  chezmoi dots pkg add example-app --cask example-app --roles home
   chezmoi dots pkg add example-tool --release --version 1.2.3 --url https://example.com/{version}/tool-{target}.tar.gz --target linux/amd64=linux-x86_64
   chezmoi dots pkg add example-tool --github octocat/example-tool --dry-run

@@ -8,9 +8,6 @@ import (
 	"strings"
 )
 
-// ValidRole reports whether r is a role a package or release can be limited to.
-func ValidRole(r string) bool { return slices.Contains(roles(), r) }
-
 // ValidPlatform reports whether p is an <os>/<arch> release target.
 func ValidPlatform(p string) bool { return platform.MatchString(p) }
 

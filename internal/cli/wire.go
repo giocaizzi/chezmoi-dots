@@ -41,7 +41,7 @@ func (d Deps) chezmoi() (*chez.Client, []string) {
 func (d Deps) sourceDir(ctx context.Context, cz *chez.Client) (string, error) {
 	v := d.Getenv("CHEZMOI_SOURCE_DIR")
 	if v == "" {
-		src, err := cz.SourcePath(ctx, "", nil)
+		src, err := cz.SourcePath(ctx, "", "", nil)
 		if err != nil {
 			return "", fmt.Errorf("find the chezmoi source dir: %w", err)
 		}
@@ -69,6 +69,9 @@ func (d Deps) service(ctx context.Context, style term.Style) (*edit.Service, err
 	if err != nil {
 		return nil, err
 	}
+	// Per-configuration renders replace the machine config, which may be the only
+	// place that names the source dir, so every client names it itself.
+	cz = cz.With("--source", src)
 	data, err := cz.Data(ctx, nil)
 	if err != nil {
 		return nil, err
@@ -83,7 +86,11 @@ func (d Deps) service(ctx context.Context, style term.Style) (*edit.Service, err
 		CZ:       cz,
 		Registry: reg,
 		Matrix: func(ctx context.Context, scratch string) ([]matrix.Entry, error) {
-			return matrix.Build(ctx, cz, src, scratch)
+			spec, err := matrix.Load(ctx, cz)
+			if err != nil {
+				return nil, err
+			}
+			return matrix.Build(ctx, cz, src, scratch, spec)
 		},
 		Tree:   tree.New(os.DirFS(src)),
 		Editor: edit.ExecEditor{Runner: d.Runner, Getenv: d.Getenv, Stdin: d.Stdin, Stdout: d.Stderr, Stderr: d.Stderr},

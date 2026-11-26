@@ -236,7 +236,7 @@ func (d Deps) addTarget(ctx context.Context, cz *chez.Client, reg registry.Regis
 	if statErr == nil && info.IsDir() {
 		return "", "", "", fmt.Errorf("%w: %s is a folder; use --local to register a folder, or add one file", ErrUsage, abs)
 	}
-	sp, serr := cz.SourcePath(ctx, abs, nil)
+	sp, serr := cz.SourcePath(ctx, abs, "", nil)
 	if serr != nil {
 		if statErr != nil {
 			return "", "", "", fmt.Errorf("add %s: %w", abs, statErr)
@@ -282,7 +282,7 @@ func (d Deps) track(ctx context.Context, cz *chez.Client, src, file, abs, name, 
 		}
 		return "", errors.Join(err, restoreRegistry(file, old, existed))
 	}
-	sp, err := cz.SourcePath(ctx, abs, nil)
+	sp, err := cz.SourcePath(ctx, abs, "", nil)
 	if err != nil {
 		return "", err
 	}

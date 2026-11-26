@@ -539,8 +539,8 @@ func parseRoles(list string) ([]string, error) {
 	var roles []string
 	for r := range strings.SplitSeq(list, ",") {
 		r = strings.TrimSpace(r)
-		if !pkgreg.ValidRole(r) {
-			return nil, pkgAddUsage("--roles takes a comma list of personal, work, light, not %q", r)
+		if r == "" {
+			return nil, pkgAddUsage("--roles takes a comma list of non-empty names")
 		}
 		if !slices.Contains(roles, r) {
 			roles = append(roles, r)

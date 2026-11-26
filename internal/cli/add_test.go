@@ -37,7 +37,7 @@ func (e *env) isolate(t *testing.T) {
 	t.Helper()
 	dir := filepath.Join(filepath.Dir(e.src), "cfg")
 	cfg := "destDir = " + quote(e.dest) + "\npersistentState = " + quote(filepath.Join(dir, "state.boltdb")) +
-		"\n[data]\n    work = false\n    light = false\n    harnesses = []\n"
+		"\n[data]\n    work = false\n    light = false\n    tools = []\n"
 	e.vars["CHEZMOI_CONFIG_FILE"] = e.file(t, dir, "chezmoi.toml", cfg)
 }
 
@@ -263,6 +263,7 @@ func (e *env) gitEnv(t *testing.T) {
 func (e *env) git(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", e.src}, args...)...)
+	cmd.Env = append(os.Environ(), gitEnv(e.sandbox)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
