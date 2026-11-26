@@ -300,11 +300,10 @@ func checkCentralDir(ra io.ReaderAt, size int64, l Limits) error {
 	br := bufio.NewReader(io.NewSectionReader(ra, d.start, size-d.start))
 	var entries, total int64
 	for {
-		var hdr [dirHeaderLen]byte
-		if _, err := io.ReadFull(br, hdr[:]); err != nil || string(hdr[:4]) != dirHeaderSig {
+		n, ok := nextHeader(br)
+		if !ok {
 			return nil // archive/zip stops here too and reports what is wrong
 		}
-		n := varLen(hdr[:])
 		entries++
 		total += dirHeaderLen + n
 		if entries > MaxEntries {
@@ -313,10 +312,20 @@ func checkCentralDir(ra io.ReaderAt, size int64, l Limits) error {
 		if total > l.MaxCentralDir {
 			return ErrTooLarge
 		}
-		if skipped, err := br.Discard(int(n)); err != nil || int64(skipped) != n {
-			return nil
-		}
 	}
+}
+
+// nextHeader reads one central directory header and skips its name, extra field and
+// comment. It returns the length of those, or false at the first header that is
+// malformed or cut short.
+func nextHeader(br *bufio.Reader) (int64, bool) {
+	var hdr [dirHeaderLen]byte
+	if _, err := io.ReadFull(br, hdr[:]); err != nil || string(hdr[:4]) != dirHeaderSig {
+		return 0, false
+	}
+	n := varLen(hdr[:])
+	skipped, err := br.Discard(int(n))
+	return n, err == nil && int64(skipped) == n
 }
 
 // locateDirectory replicates archive/zip's readDirectoryEnd: the end record in the last

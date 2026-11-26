@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
@@ -444,7 +445,7 @@ func TestListZipUnderstatedEntryCount(t *testing.T) {
 	copy(eocd, "PK\x05\x06")
 	binary.LittleEndian.PutUint16(eocd[10:], 1)
 	binary.LittleEndian.PutUint32(eocd[12:], 46)
-	data := append(dir, eocd...)
+	data := slices.Concat(dir, eocd)
 	if _, err := archive.List(archive.Zip, bytes.NewReader(data)); !errors.Is(err, archive.ErrTooManyEntries) {
 		t.Errorf("List = %v, want %v", err, archive.ErrTooManyEntries)
 	}
