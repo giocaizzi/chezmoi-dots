@@ -99,7 +99,7 @@ func TestAuditAliases(t *testing.T) {
 		if err != nil {
 			t.Fatalf("audit aliases = %v, want nil", err)
 		}
-		want := "aliases: skipped, no rendered alias file " + filepath.Join(cfg, "shell", "aliases.sh") + " (see docs/alias-registry.md)\n"
+		want := "aliases: skipped, no rendered alias file " + filepath.Join(cfg, "shell", "aliases.sh") + " (see chezmoi dots help audit)\n"
 		if out != want {
 			t.Errorf("stdout = %q, want %q", out, want)
 		}
@@ -159,7 +159,15 @@ func TestAuditAliasesBashWithoutAliases(t *testing.T) {
 		}
 		return "", errors.New("not found")
 	}
-	out, err := runAuditAliases(t, aliasConfig(t, true), sandboxRunner{sandboxEnv(t.TempDir())}, lookBash)
+	sandbox := sandboxEnv(t.TempDir())
+	// The sandbox HOME has no ~/.bashrc, but the host's system startup files still run
+	// in an interactive bash: skip where they define aliases, so the test stays hermetic.
+	probe := exec.CommandContext(t.Context(), "bash", "-ic", "compgen -a || true")
+	probe.Env = append(os.Environ(), sandbox...)
+	if got, err := probe.Output(); err != nil || len(bytes.TrimSpace(got)) > 0 {
+		t.Skipf("host bash defines aliases in its system startup files (%q, %v)", got, err)
+	}
+	out, err := runAuditAliases(t, aliasConfig(t, true), sandboxRunner{sandbox}, lookBash)
 	if err != nil {
 		t.Fatalf("audit aliases = %v, want bash without aliases to pass", err)
 	}
