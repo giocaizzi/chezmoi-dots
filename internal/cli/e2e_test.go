@@ -60,6 +60,13 @@ func sandboxEnv(dir string) []string {
 	return out
 }
 
+// gitEnv is the sandbox environment for test git commands: with HOME and XDG_* in
+// scratch and no system config, no global config, hooks or core.hooksPath of the
+// developer apply.
+func gitEnv(dir string) []string {
+	return append(sandboxEnv(dir), "GIT_CONFIG_NOSYSTEM=1")
+}
+
 // sandboxRunner runs commands as processes with the sandbox environment.
 type sandboxRunner struct{ env []string }
 
@@ -284,7 +291,7 @@ func configureEditAutomation(t *testing.T, path string) {
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := chez.Cmd{Dir: dir, Args: append([]string{"git"}, args...)}
+	cmd := chez.Cmd{Dir: dir, Args: append([]string{"git"}, args...), Env: gitEnv(t.TempDir())}
 	out, err := chez.Output(t.Context(), chez.ExecRunner{}, cmd)
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
@@ -488,7 +495,7 @@ func TestMatrixReview(t *testing.T) {
 func TestConfigTemplateFormats(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name, file, text, probe, want, notWant, xfail string
+		name, file, text, probe, want, notWant string
 	}{
 		{
 			name: "yaml", file: ".chezmoi.yaml.tmpl",
@@ -502,7 +509,6 @@ func TestConfigTemplateFormats(t *testing.T) {
 			text:  "data:\n  fromTemplate: yml-{{ .chezmoi.os }}\n",
 			probe: `{{ if eq (get . "fromTemplate" | default "") "yml-linux" }}{ broken{{ end }}`,
 			want:  "(linux/default)", notWant: "(darwin/",
-			xfail: ".chezmoi.yml.tmpl is not read, so the source is treated as having no config template",
 		},
 		{
 			name: "json", file: ".chezmoi.json.tmpl",
@@ -524,9 +530,6 @@ func TestConfigTemplateFormats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.xfail != "" {
-				t.Skip("xfail: " + tt.xfail)
-			}
 			e := newEnv(t)
 			if tt.name == "none" {
 				e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
@@ -559,6 +562,11 @@ func TestMultipleConfigTemplatesFail(t *testing.T) {
 	_, _, err = e.run(t, "", "lint", "templates")
 	if err == nil || !strings.Contains(err.Error(), "multiple config file templates") {
 		t.Errorf("lint templates = %v, want the multiple config file templates error", err)
+	}
+	yml := newEnv(t)
+	yml.writeFile(t, ".chezmoi.yml.tmpl", "data: {}\n")
+	if _, _, err = yml.run(t, "", "lint", "templates"); err == nil || !strings.Contains(err.Error(), "multiple config file templates: .chezmoi.toml.tmpl, .chezmoi.yml.tmpl") {
+		t.Errorf("lint templates with toml and yml = %v, want the multiple config file templates error", err)
 	}
 }
 

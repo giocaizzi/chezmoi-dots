@@ -263,6 +263,7 @@ func (e *env) gitEnv(t *testing.T) {
 func (e *env) git(t *testing.T, args ...string) string {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), "git", append([]string{"-C", e.src}, args...)...)
+	cmd.Env = append(os.Environ(), gitEnv(e.sandbox)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
