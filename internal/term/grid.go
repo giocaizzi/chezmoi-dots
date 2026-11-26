@@ -20,29 +20,34 @@ func (s Style) Palette() []string {
 	return []string{s.G, s.M, s.C, s.Y, s.B}
 }
 
-// MatrixGrid prints a 3×3 OS × Role block.
-func (s Style) MatrixGrid(w io.Writer, cell func(os, role string) (glyph, color string)) {
+// MatrixGrid prints an OS × profile block: a row per OS, a column per profile headed
+// by its short label (matrix.Short).
+func (s Style) MatrixGrid(w io.Writer, profiles []string, short map[string]string, cell func(os, profile string) (glyph, color string)) {
 	oses := []string{"darwin", "linux", "windows"}
-	roles := []string{"personal", "work", "light"}
+	width := 1
+	for _, p := range profiles {
+		width = max(width, visibleWidth(short[p]))
+	}
 
-	fmt.Fprintln(w, "            personal    work     light")
+	var h strings.Builder
+	fmt.Fprintf(&h, "%-12s", "")
+	for _, p := range profiles {
+		h.WriteString("  " + padRight(short[p], width))
+	}
+	fmt.Fprintln(w, strings.TrimRight(h.String(), " "))
 	for _, osName := range oses {
 		var b strings.Builder
 		fmt.Fprintf(&b, "%-12s", osName)
-		for i, role := range roles {
-			glyph, color := cell(osName, role)
-			if i == 0 {
-				b.WriteString("   ")
-			} else {
-				b.WriteString("         ")
-			}
+		for i, p := range profiles {
+			glyph, color := cell(osName, p)
 			if color != "" && s.O != "" {
-				b.WriteString(color)
-				b.WriteString(glyph)
-				b.WriteString(s.O)
-			} else {
-				b.WriteString(glyph)
+				glyph = color + glyph + s.O
 			}
+			b.WriteString("  ")
+			if i < len(profiles)-1 {
+				glyph = padRight(glyph, width)
+			}
+			b.WriteString(glyph)
 		}
 		fmt.Fprintln(w, b.String())
 	}
@@ -51,15 +56,17 @@ func (s Style) MatrixGrid(w io.Writer, cell func(os, role string) (glyph, color 
 // OverviewRow represents one row in the matrix preview overview table.
 type OverviewRow struct {
 	Entry   string // entry name (e.g. "ghostty")
-	Darwin  string // 3-symbol block e.g. "■ ■ □" or "· · ·"
-	Linux   string // 3-symbol block e.g. "■ ■ □"
-	Windows string // 3-symbol block e.g. "□ □ □"
+	Darwin  string // one symbol per profile, e.g. "■ ■ □" or "· · ·"
+	Linux   string // one symbol per profile, e.g. "■ ■ □"
+	Windows string // one symbol per profile, e.g. "□ □ □"
 	Targets string // description e.g. "2 targets (macOS, Linux)" or "1 target (all)"
 }
 
-// OverviewTable prints a formatted table of all entries across the matrix.
-func (s Style) OverviewTable(w io.Writer, rows []OverviewRow) {
-	header := "  ENTRY                 DARWIN    LINUX     WINDOWS   TARGETS"
+// OverviewTable prints a formatted table of all entries across the matrix, whose OS
+// blocks hold one symbol for each of the given number of profiles.
+func (s Style) OverviewTable(w io.Writer, profiles int, rows []OverviewRow) {
+	width := max(10, 2*profiles+1)
+	header := "  " + padRight("ENTRY", 22) + padRight("DARWIN", width) + padRight("LINUX", width) + padRight("WINDOWS", width) + "TARGETS"
 	if s.D != "" {
 		fmt.Fprintf(w, "%s%s%s\n", s.D, header, s.O)
 	} else {
@@ -76,9 +83,9 @@ func (s Style) OverviewTable(w io.Writer, rows []OverviewRow) {
 		}
 		fmt.Fprintf(w, "  %s%s%s%s%s\n",
 			padRight(entry, 22),
-			padRight(r.Darwin, 10),
-			padRight(r.Linux, 10),
-			padRight(r.Windows, 10),
+			padRight(r.Darwin, width),
+			padRight(r.Linux, width),
+			padRight(r.Windows, width),
 			targets,
 		)
 	}
