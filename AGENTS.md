@@ -11,10 +11,18 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `internal/matrix/` — 9-matrix OS (Darwin, Linux, Windows) × Role (Personal, Work, Light) evaluator.
 - `internal/lint/` — Comprehensive template and registry integrity validator.
 - `internal/pkgreg/` — Package and release registry validator and version comparator.
-- `internal/release/` — Remote release fetcher and automated checksum bumper (`dots pkg bump`).
+- `internal/release/` — Remote release fetcher, commit HEAD lookups and automated checksum bumper (`dots pkg bump`).
+- `internal/extpin/` — Commit-pinned archive externals in `.chezmoiexternal` files: scan and in-place bump.
 - `internal/inventory/` — System package and tool inventory scanner across package managers.
 - `internal/audit/` — Live unmanaged shell alias detector (`dots audit`).
 - `internal/aliasreg/` — Cross-shell alias registry compiler.
+- `internal/cli/` — Command parsing, help and wiring of adapters into use cases.
+- `internal/survey/` — Fills the `pkg status` overview from package managers, release binaries and git.
+- `internal/registry/` — Edit registry (`.chezmoidata/edit.toml`) parse and add.
+- `internal/upgrade/` — Upgrade plan and run for dotfiles, system packages and language tools.
+- `internal/finding/` — Result type of the lint checks.
+- `internal/tree/` — Composition tree of a source file (includes, symlink targets, data files).
+- `internal/udiff/` — Unified diffs of two texts.
 - `internal/chez/` — Chezmoi client abstraction and execution wrapper.
 - `internal/term/` — Terminal styling, Catppuccin themes, and inventory tables.
 
@@ -30,6 +38,9 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `make check` — Run linter and tests with race detection (`check: lint test`).
 - `make lint` — Run `golangci-lint run`.
 - `make test` — Run unit and integration tests with `go test -race -shuffle=on ./...`.
+- `make check-fast` — Run tests without the race detector.
+- `make test-help` — Run the focused help regression tests (from `help-tests.mk`).
+- `make test-help-goldens` — Regenerate the help golden files.
 - `make build` — Build cross-platform binaries into `bin/`.
 
 ## Conventional Commits

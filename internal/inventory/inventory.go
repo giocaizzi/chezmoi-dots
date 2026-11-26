@@ -17,6 +17,7 @@ type Source string
 // The sources, in the order the overview prints them.
 const (
 	Release Source = "release" // [release.*]: pinned binaries chezmoi installs as externals
+	Archive Source = "archive" // commit-pinned archive externals (.chezmoiexternal files)
 	Brew    Source = "brew"    // Homebrew formulae and casks (macOS)
 	Apt     Source = "apt"     // apt packages (Linux)
 	Winget  Source = "winget"  // winget packages (Windows)
@@ -26,7 +27,7 @@ const (
 )
 
 // Sources lists every source in print order.
-func Sources() []Source { return []Source{Release, Brew, Apt, Winget, UV, Npm, Script} }
+func Sources() []Source { return []Source{Release, Archive, Brew, Apt, Winget, UV, Npm, Script} }
 
 // Tool is one row of the overview.
 type Tool struct {
@@ -34,8 +35,8 @@ type Tool struct {
 	ID        string // the package's name in its manager when it differs from Name ("fd-find"); "" otherwise
 	Installed string // installed version; "" when not installed or not known (see Missing)
 	Missing   bool   // known not to be installed
-	Pinned    string // the registry's pin: a release version, or an npm version prefix ("5"); "" when unpinned
-	Latest    string // newest version known; "" when unknown (offline, lookup failed, no lookup for this source)
+	Pinned    string // the registry's pin: a release version, an npm version prefix ("5") or, for an Archive, the pinned commit (40 hex); "" when unpinned
+	Latest    string // newest version known (for an Archive, the remote's HEAD commit); "" when unknown (offline, lookup failed, no lookup for this source)
 }
 
 // State is what a tool's versions add up to.
@@ -56,11 +57,20 @@ func Matches(version, pin string) bool {
 	return version == pin || strings.HasPrefix(version, pin+".")
 }
 
-// State classifies t. A release is outdated when upstream has a newer version than
+// State classifies t. An archive is outdated when its remote's HEAD is not the
+// pinned commit (it is never installed or missing here). A release is outdated when upstream has a newer version than
 // its pin (whatever is installed matches the pin); a package is outdated when its
 // manager knows a newer version than the installed one that still matches its pin.
 func (t Tool) State(src Source) State {
 	switch {
+	case src == Archive:
+		switch {
+		case t.Latest == "":
+			return Unknown
+		case t.Latest != t.Pinned:
+			return Outdated
+		}
+		return UpToDate
 	case t.Missing:
 		return Missing
 	case t.Installed != "" && t.Pinned != "" && !Matches(t.Installed, t.Pinned):

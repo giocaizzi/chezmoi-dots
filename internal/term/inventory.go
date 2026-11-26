@@ -11,10 +11,18 @@ import (
 	"github.com/giocaizzi/chezmoi-dots/internal/inventory"
 )
 
+const (
+	toolHeader   = "TOOL"
+	latestHeader = "LATEST"
+	stateHeader  = "STATE"
+)
+
 func groupTitle(src inventory.Source) string {
 	switch src {
 	case inventory.Release:
 		return "Pinned releases"
+	case inventory.Archive:
+		return "Pinned archives"
 	case inventory.Brew:
 		return "Homebrew"
 	case inventory.UV:
@@ -93,12 +101,38 @@ func (s Style) Inventory(w io.Writer, r inventory.Report, now time.Time) {
 	}
 }
 
+// shortSHA is the first 7 characters of a commit.
+func shortSHA(v string) string {
+	if len(v) > 7 {
+		return v[:7]
+	}
+	return v
+}
+
+func (s Style) archiveTable(w io.Writer, g inventory.Group) {
+	dash := s.D + "—" + s.O
+	rows := make([][]string, 0, len(g.Tools))
+	for _, t := range g.Tools {
+		rows = append(rows, []string{
+			s.M + t.Name + s.O,
+			orElse(shortSHA(t.Pinned), dash),
+			orElse(shortSHA(t.Latest), s.D+"unknown"+s.O),
+			s.stateText(t.State(g.Source)),
+		})
+	}
+	s.Table(w, []string{toolHeader, "PINNED", latestHeader, stateHeader}, rows)
+}
+
 func (s Style) inventoryTable(w io.Writer, g inventory.Group) {
+	if g.Source == inventory.Archive {
+		s.archiveTable(w, g)
+		return
+	}
 	pinned := g.Source == inventory.Release ||
 		(g.Source == inventory.Npm && slices.ContainsFunc(g.Tools, func(t inventory.Tool) bool { return t.Pinned != "" }))
-	header := []string{"TOOL", "INSTALLED", "LATEST", "STATE"}
+	header := []string{toolHeader, "INSTALLED", latestHeader, stateHeader}
 	if pinned {
-		header = []string{"TOOL", "INSTALLED", "PINNED", "LATEST", "STATE"}
+		header = []string{toolHeader, "INSTALLED", "PINNED", latestHeader, stateHeader}
 	}
 	dash := s.D + "—" + s.O
 	unknown := s.D + "unknown" + s.O

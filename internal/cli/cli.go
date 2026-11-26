@@ -29,6 +29,8 @@ type Deps struct {
 	Version  string
 	GOOS     string
 	Home     string
+	// Interactive reports whether Stdin is a terminal the user answers on; nil asks Stdin itself.
+	Interactive func() bool
 }
 
 // ErrReported is returned for a failure that was already printed.
@@ -49,6 +51,7 @@ const (
 	cmdPkg      = "pkg"
 	cmdPkgState = "pkg status"
 	cmdPkgBump  = "pkg bump"
+	cmdPkgAdd   = "pkg add"
 	cmdUpgrade  = "upgrade"
 	cmdLive     = "live"
 	cmdVersion  = "version"

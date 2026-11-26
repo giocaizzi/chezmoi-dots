@@ -87,8 +87,8 @@ func checkEntry(name, desc, where, value string) error {
 	return nil
 }
 
-// commitRegistry stages, commits and pushes only the registry file as far as the
-// chezmoi git settings ask, as edit does for a source file.
+// commitRegistry stages, commits and pushes only file (a registry file) as far as
+// the chezmoi git settings ask, as edit does for a source file.
 func (d Deps) commitRegistry(ctx context.Context, cz *chez.Client, file string) error {
 	cfg, err := cz.EditConfig(ctx)
 	if err != nil {
@@ -100,7 +100,7 @@ func (d Deps) commitRegistry(ctx context.Context, cz *chez.Client, file string) 
 	}
 	rel, err := filepath.Rel(cfg.WorkingTree, file)
 	if err != nil || !filepath.IsLocal(rel) {
-		return fmt.Errorf("registry file %s is outside the Git working tree %s", file, cfg.WorkingTree)
+		return fmt.Errorf("file %s is outside the Git working tree %s", file, cfg.WorkingTree)
 	}
 	rel = filepath.ToSlash(rel)
 	git := edit.ExecGit{Runner: d.Runner}

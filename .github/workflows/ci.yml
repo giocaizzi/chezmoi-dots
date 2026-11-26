@@ -71,6 +71,23 @@ jobs:
           esac
           echo "code=$code" >> "$GITHUB_OUTPUT"
 
+  # Unit tests on the other operating systems the tool ships for; ubuntu runs them in `check` (make check).
+  test-os:
+    if: ${{ !github.event.pull_request.draft }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # Windows runners have no GNU make: run the same command as `make check-fast`.
+      - run: go test -shuffle=on ./...
+
   # Example heavy job gated by `changes`: uncomment, adapt, add it to `check.needs` and to GATED in `check`.
   # e2e:
   #   needs: [changes]
@@ -94,7 +111,7 @@ jobs:
   # Required status check of the GitHub standard. Add jobs to `needs`, never rename this job.
   check:
     name: ${{ github.event.pull_request.draft && 'Skip CI (draft)' || 'check' }}
-    needs: [secrets, changes]
+    needs: [secrets, changes, test-os]
     if: ${{ always() && !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     timeout-minutes: 20

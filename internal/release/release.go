@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -25,7 +26,33 @@ type Finder struct {
 	Runner chez.Runner         // runs git ls-remote
 	HTTP   *http.Client        // go.dev and the downloads; needs a timeout
 	Getenv func(string) string // nil reads nothing
+
+	MaxBytes        int64         // largest download SHA256 accepts; 0 means 1 GiB
+	DownloadTimeout time.Duration // per download, body included; 0 means 5 minutes
 }
+
+const (
+	defaultMaxBytes        = 1 << 30
+	defaultDownloadTimeout = 5 * time.Minute
+)
+
+func (f Finder) maxBytes() int64 {
+	if f.MaxBytes > 0 {
+		return f.MaxBytes
+	}
+	return defaultMaxBytes
+}
+
+func (f Finder) downloadTimeout() time.Duration {
+	if f.DownloadTimeout > 0 {
+		return f.DownloadTimeout
+	}
+	return defaultDownloadTimeout
+}
+
+const gitBin = "git"
+
+var commit = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 var numeric = regexp.MustCompile(`^[0-9]+(\.[0-9]+){1,2}$`)
 
@@ -34,7 +61,7 @@ func (f Finder) Latest(ctx context.Context, up pkgreg.Upstream) (string, error) 
 	switch up.Kind {
 	case "git":
 		out, err := chez.Output(ctx, f.Runner, chez.Cmd{
-			Args: []string{"git", "ls-remote", "--tags", "--refs", up.Repo},
+			Args: []string{gitBin, "ls-remote", "--tags", "--refs", up.Repo},
 			Env:  chez.GitNoPromptEnv(ctx, f.Runner, f.Getenv, ""), // never ask for credentials or a passphrase
 		})
 		if err != nil {
@@ -46,6 +73,24 @@ func (f Finder) Latest(ctx context.Context, up pkgreg.Upstream) (string, error) 
 	default:
 		return "", fmt.Errorf("unknown upstream kind %q", up.Kind)
 	}
+}
+
+// Head returns the commit the default branch (HEAD) of remote points at.
+func (f Finder) Head(ctx context.Context, remote string) (string, error) {
+	out, err := chez.Output(ctx, f.Runner, chez.Cmd{
+		Args: []string{gitBin, "ls-remote", remote, "HEAD"},
+		Env:  chez.GitNoPromptEnv(ctx, f.Runner, f.Getenv, ""), // never ask for credentials or a passphrase
+	})
+	if err != nil {
+		return "", fmt.Errorf("read HEAD of %s: %w", remote, err)
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == "HEAD" && commit.MatchString(fields[0]) {
+			return fields[0], nil
+		}
+	}
+	return "", fmt.Errorf("no HEAD in git ls-remote of %s", remote)
 }
 
 // newestTag picks the highest numeric version among tags named <prefix><version>.
@@ -88,21 +133,40 @@ func (f Finder) latestGo(ctx context.Context) (string, error) {
 	return "", errors.New("go.dev lists no stable release")
 }
 
-// SHA256 downloads url and returns the SHA-256 of its body.
+// SHA256 downloads url and returns the SHA-256 of its body. It fails when the
+// body exceeds MaxBytes or the whole download outlasts DownloadTimeout.
 func (f Finder) SHA256(ctx context.Context, url string) (string, error) {
-	body, err := f.get(ctx, url)
+	ctx, cancel := context.WithTimeout(ctx, f.downloadTimeout())
+	defer cancel()
+	resp, err := f.do(ctx, url)
 	if err != nil {
 		return "", err
 	}
-	defer body.Close()
+	defer resp.Body.Close()
+	limit := f.maxBytes()
+	if resp.ContentLength > limit {
+		return "", fmt.Errorf("download %s: larger than %d bytes", url, limit)
+	}
 	h := sha256.New()
-	if _, err := io.Copy(h, body); err != nil {
+	n, err := io.Copy(h, io.LimitReader(resp.Body, limit+1))
+	if err != nil {
 		return "", fmt.Errorf("download %s: %w", url, err)
+	}
+	if n > limit {
+		return "", fmt.Errorf("download %s: larger than %d bytes", url, limit)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func (f Finder) get(ctx context.Context, url string) (io.ReadCloser, error) {
+	resp, err := f.do(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
+func (f Finder) do(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("request %s: %w", url, err)
@@ -115,7 +179,7 @@ func (f Finder) get(ctx context.Context, url string) (io.ReadCloser, error) {
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("get %s: %s", url, resp.Status)
 	}
-	return resp.Body, nil
+	return resp, nil
 }
 
 // Status is the outcome of looking up one release.

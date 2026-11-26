@@ -7,6 +7,13 @@
   <m>gitleaks</>  8.28.0     8.28.0  8.30.0  <y>↑ outdated</>
   <m>shfmt</>     <d>—</>    3.12.0  3.12.0  <r>✗ not installed</>
 
+<b>Pinned archives</> <d>(3)</>
+  <d>TOOL                   PINNED   LATEST         STATE</>
+  <m>octocat/example</>  aaaaaaa  bbbbbbb        <y>↑ outdated</>
+  <m>octocat/stable</>   ccccccc  ccccccc        <g>✓ up to date</>
+  <m>octocat/offline</>  ddddddd  <d>unknown</>  <d>? unknown</>
+  <d>latest unknown for 1 (no network or lookup failed)</>
+
 <b>Homebrew</> <d>(2)</>
   <d>TOOL                      INSTALLED  LATEST  STATE</>
   <m>fd</> <d>(fd-find)</>  10.2.0     10.3.0  <y>↑ outdated</>
@@ -28,12 +35,13 @@
   <m>bun</>  <d>—</>    <d>unknown</>  <r>✗ not installed</>
 
 <b>source</>  <m>main</> <d>·</> <y>2 behind upstream</> <d>·</> <y>3 local changes</> <d>·</> <d>fetched 3h ago</>
-<b>summary</> 10 tools <d>·</> <g>3 up to date</> <d>·</> <y>2 outdated</> <d>·</> <c>2 drifted</> <d>·</> <r>2 not installed</> <d>·</> <d>1 unknown</>
+<b>summary</> 13 tools <d>·</> <g>4 up to date</> <d>·</> <y>3 outdated</> <d>·</> <c>2 drifted</> <d>·</> <r>2 not installed</> <d>·</> <d>2 unknown</>
 
 <b>next</>
-  <m>chezmoi dots upgrade dotfiles</>  <d>pull 2 commits from origin/main, then re-run</>
-  <m>chezmoi dots pkg bump gitleaks</>  <d>pin the newer release</>
-  <m>chezmoi apply</>             <d>install the pinned agents, shfmt</>
-  <m>chezmoi dots upgrade brew</>  <d>upgrade 1 brew package</>
-  <m>npm install -g typescript@5</>  <d>back to the registry pin</>
+  <m>chezmoi dots upgrade dotfiles</>    <d>pull 2 commits from origin/main, then re-run</>
+  <m>chezmoi dots pkg bump gitleaks</>   <d>pin the newer release</>
+  <m>chezmoi dots pkg bump octocat/example</>  <d>pin the newer commit</>
+  <m>chezmoi apply</>                    <d>install the pinned agents, shfmt</>
+  <m>chezmoi dots upgrade brew</>        <d>upgrade 1 brew package</>
+  <m>npm install -g typescript@5</>      <d>back to the registry pin</>
   <d>not installed: bun (the install script runs when packages.toml changes)</>

@@ -1,0 +1,2 @@
+# Golden files compare byte for byte: keep LF on every OS (Windows checkouts default to CRLF).
+*.golden text eol=lf

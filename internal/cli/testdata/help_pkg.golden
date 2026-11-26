@@ -6,9 +6,10 @@ USAGE
 COMMANDS
   status     Every tool: installed, pinned and latest versions
   bump       Update pinned versions and checksums in the source
+  add        Add a package or pinned release to the source
 
 ARGUMENTS
-  command  status or bump; the command is the first argument after pkg.
+  command  status, bump or add; the command is the first argument after pkg.
 
 OPTIONS
   -h, --help  Show this help and exit successfully.
@@ -21,3 +22,4 @@ ENVIRONMENT
 EXAMPLES
   chezmoi dots pkg status
   chezmoi dots pkg bump --dry-run
+  chezmoi dots pkg add example-tool --brew

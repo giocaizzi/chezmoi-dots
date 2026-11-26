@@ -2,9 +2,16 @@ package release
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -65,5 +72,125 @@ func TestLatestGitNeverPrompts(t *testing.T) {
 				t.Errorf("env (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+// headRunner answers git ls-remote with out, or err.
+type headRunner struct {
+	out  string
+	err  error
+	args []string
+	env  []string
+}
+
+func (r *headRunner) Run(_ context.Context, c chez.Cmd) error {
+	if slices.Contains(c.Args, "config") {
+		return nil
+	}
+	r.args, r.env = c.Args, c.Env
+	if r.err != nil {
+		return r.err
+	}
+	_, err := io.WriteString(c.Stdout, r.out)
+	return err
+}
+
+func TestHead(t *testing.T) {
+	t.Parallel()
+	const sha = "0123456789abcdef0123456789abcdef01234567"
+	const remote = "https://example.com/octocat/hello.git"
+	tests := []struct {
+		name    string
+		out     string
+		err     error
+		want    string
+		wantErr bool
+	}{
+		{"ok", sha + "\tHEAD\n", nil, sha, false},
+		{"head among others", "bbbb\trefs/heads/main\n" + sha + "\tHEAD\n", nil, sha, false},
+		{"no HEAD line", sha + "\trefs/heads/main\n", nil, "", true},
+		{"not a commit", "zzz\tHEAD\n", nil, "", true},
+		{"empty", "", nil, "", true},
+		{"runner error", "", errors.New("boom"), "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := &headRunner{out: tt.out, err: tt.err}
+			f := Finder{Runner: r, Getenv: func(string) string { return "" }}
+			got, err := f.Head(t.Context(), remote)
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("Head() = %q, %v, want %q (err %v)", got, err, tt.want, tt.wantErr)
+			}
+			if diff := cmp.Diff([]string{"git", "ls-remote", remote, "HEAD"}, r.args); diff != "" {
+				t.Errorf("args (-want +got):\n%s", diff)
+			}
+			if !slices.Contains(r.env, "GIT_TERMINAL_PROMPT=0") {
+				t.Errorf("env %v lacks GIT_TERMINAL_PROMPT=0", r.env)
+			}
+		})
+	}
+}
+
+func TestSHA256Limits(t *testing.T) {
+	t.Parallel()
+	body := strings.Repeat("a", 100)
+	sum := sha256.Sum256([]byte(body))
+	want := hex.EncodeToString(sum[:])
+
+	tests := []struct {
+		name    string
+		max     int64
+		handler http.HandlerFunc
+		timeout time.Duration
+		wantErr string
+	}{
+		{name: "within cap", max: 100, handler: func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = io.WriteString(w, body)
+		}},
+		{name: "body over cap", max: 99, wantErr: "larger than 99 bytes", handler: func(w http.ResponseWriter, _ *http.Request) {
+			_ = http.NewResponseController(w).Flush() // chunked: no Content-Length
+			_, _ = io.WriteString(w, body)
+		}},
+		{name: "content length over cap", max: 10, wantErr: "larger than 10 bytes", handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", "100")
+			w.WriteHeader(http.StatusOK) // body never written; the client must not wait for it
+		}},
+		{name: "slow body", max: 100, timeout: 50 * time.Millisecond, wantErr: context.DeadlineExceeded.Error(), handler: func(w http.ResponseWriter, r *http.Request) {
+			_ = http.NewResponseController(w).Flush()
+			<-r.Context().Done()
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(tt.handler)
+			t.Cleanup(srv.Close)
+			f := Finder{HTTP: srv.Client(), MaxBytes: tt.max, DownloadTimeout: tt.timeout}
+			got, err := f.SHA256(t.Context(), srv.URL)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("SHA256() error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("SHA256(): %v", err)
+			}
+			if got != want {
+				t.Errorf("SHA256() = %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestFinderDefaults(t *testing.T) {
+	t.Parallel()
+	var f Finder
+	if got := f.maxBytes(); got != 1<<30 {
+		t.Errorf("maxBytes() = %d, want 1 GiB", got)
+	}
+	if got := f.downloadTimeout(); got != 5*time.Minute {
+		t.Errorf("downloadTimeout() = %v, want 5m", got)
 	}
 }

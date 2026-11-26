@@ -27,7 +27,7 @@ Declarative registry-driven editing, package survey and drift detection, pin bum
 - **Zero-Config Fallback**: Works on any `chezmoi managed` repository without configuration—fuzzy pick and edit any managed target directly.
 - **Add & Register (`dots add`)**: Bring a new file under chezmoi and register it for editing in one step.
 - **Status Snapshot (`dots status`)**: See the dotfiles checkout (branch, ahead/behind, local changes) and what `chezmoi apply` would change, without touching the network.
-- **Package Survey & Pins (`dots pkg status`, `dots pkg bump`)**: Query Homebrew, Apt, winget, uv, npm, and GitHub Releases to detect version drift against your pins. Update pins with comment-preserving text edits.
+- **Package Survey & Pins (`dots pkg status`, `dots pkg bump`)**: Query Homebrew, Apt, winget, uv, npm, and GitHub Releases to detect version drift against your pins. Also tracks commit-pinned archive externals. Update pins with comment-preserving text edits.
 - **Live Preview**: Editing can render live updates to a side pane using tmux or Windows Terminal; `live` is the internal pane command.
 - **Template Composition (`dots view`)**: Inspect a target's composition tree and rendered content, including previews across OS/role configurations.
 - **Template Linting (`dots lint`)**: Verify template syntax, detect unrendered delimiters, and validate cross-OS matrix configurations.
@@ -38,16 +38,21 @@ Declarative registry-driven editing, package survey and drift detection, pin bum
 
 ### With Chezmoi (Recommended)
 
-Declare `chezmoi-dots` as a release external in your dotfiles repository:
+Declare `chezmoi-dots` as an external in your dotfiles repository:
 
 ```toml
-# .chezmoidata/packages.toml
-[release.chezmoi-dots]
-repo = "giocaizzi/chezmoi-dots"
-version = "0.1.0"
+# .chezmoiexternal.toml.tmpl
+{{- $v := "0.3.0" }}
+{{- $exe := ternary ".exe" "" (eq .chezmoi.os "windows") }}
+[".local/bin/chezmoi-dots{{ $exe }}"]
+type = "file"
+url = "https://github.com/giocaizzi/chezmoi-dots/releases/download/v{{ $v }}/chezmoi-dots_{{ $v }}_{{ .chezmoi.os }}_{{ .chezmoi.arch }}{{ $exe }}"
+executable = true
 ```
 
-Once installed to `~/.local/bin/chezmoi-dots`, chezmoi automatically delegates:
+Release assets exist for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64 and windows/amd64. Optionally add `checksum.sha256` from the release's `checksums.txt`.
+
+Once the binary is on your `PATH` (for example `~/.local/bin`), chezmoi automatically delegates:
 
 ```bash
 chezmoi dots <command>
@@ -80,7 +85,8 @@ go install github.com/giocaizzi/chezmoi-dots/cmd/chezmoi-dots@latest
 | `dots lint` | `[<check>...]` | Lint registries, template syntax, and matrix rules |
 | `dots audit` | `[<check>...]` | Audit live shell aliases against the alias registry |
 | `dots pkg status` | none | Survey installed packages against pins and upstream releases |
-| `dots pkg bump` | `[<pin>...]` | Fetch latest releases and update pinned versions in the registry |
+| `dots pkg bump` | `[<pin>...]` | Fetch latest releases and archive commits, and update the pins in the registry and externals files |
+| `dots pkg add` | `<name>` | Add a package or pinned release to `packages.toml` |
 | `dots version` | none | Print the binary version |
 | `dots help` | `[<command> [<subcommand>]]` | Show root or local help |
 
