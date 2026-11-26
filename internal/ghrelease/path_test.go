@@ -1,6 +1,7 @@
 package ghrelease
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -162,6 +163,61 @@ func TestProposePath(t *testing.T) {
 			}
 			if !tt.wantOK && tt.wantPath != "" {
 				t.Errorf("path %q with ok false", got)
+			}
+		})
+	}
+}
+
+// TestProposePathRendersToTheListedFile checks the contract of a found path: with
+// {version} and {target} replaced by the release version and the registry's target
+// value (as an externals template does), plus ".exe" on windows, it names the file
+// that matched in that target's archive.
+func TestProposePathRendersToTheListedFile(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		xfail string
+		p     Proposal
+		files map[string][]archive.File
+	}{
+		{
+			name: "target values without an extension",
+			p:    Proposal{Version: "1.2.3", Targets: map[string]string{"linux/amd64": "linux_amd64", "windows/amd64": "windows_amd64"}},
+			files: map[string][]archive.File{
+				"linux/amd64": exe("tool_1.2.3_linux_amd64/tool"), "windows/amd64": exe("tool_1.2.3_windows_amd64/tool.exe"),
+			},
+		},
+		{
+			name:  "target values carry the archive extension",
+			xfail: "templatePath writes {target} for the value without its extension, which {target} never expands to",
+			p:     Proposal{Version: "1.2.3", Targets: map[string]string{"linux/amd64": "linux_amd64.tar.gz", "windows/amd64": "windows_amd64.zip"}},
+			files: map[string][]archive.File{
+				"linux/amd64": exe("tool_1.2.3_linux_amd64/tool"), "windows/amd64": exe("tool_1.2.3_windows_amd64/tool.exe"),
+			},
+		},
+	}
+	for _, tt := range tests {
+		name := tt.name
+		if tt.xfail != "" {
+			name = "xfail: " + name
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if tt.xfail != "" {
+				t.Skip("xfail: " + tt.xfail)
+			}
+			got, ok, _ := ProposePath([]string{"tool"}, tt.p, tt.files)
+			if !ok {
+				return // an unsettled path makes no promise
+			}
+			for k, list := range tt.files {
+				rendered := strings.NewReplacer("{version}", tt.p.Version, "{target}", tt.p.Targets[k]).Replace(got)
+				if strings.HasPrefix(k, "windows/") {
+					rendered += extExe
+				}
+				if rendered != list[0].Path {
+					t.Errorf("%s: path %q renders to %q, want the listed %q", k, got, rendered, list[0].Path)
+				}
 			}
 		})
 	}

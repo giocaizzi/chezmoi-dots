@@ -26,7 +26,10 @@ type entry struct {
 func tarGz(t *testing.T, entries []entry) []byte {
 	t.Helper()
 	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
+	zw, err := gzip.NewWriterLevel(&buf, gzip.BestSpeed) // the entry-cap fixture is slow at the default level
+	if err != nil {
+		t.Fatal(err)
+	}
 	tw := tar.NewWriter(zw)
 	for _, e := range entries {
 		typ := e.typ
@@ -181,27 +184,80 @@ func TestListErrors(t *testing.T) {
 	t.Parallel()
 	many := make([]entry, archive.MaxEntries+1)
 	for i := range many {
-		many[i] = entry{name: fmt.Sprintf("f%d", i), mode: 0o644}
+		many[i] = entry{name: fmt.Sprintf("d%d/", i), mode: 0o755, typ: tar.TypeDir} // every entry counts, not only regular files
 	}
 	tests := []struct {
-		name string
-		kind archive.Kind
-		data []byte
-		want error // nil: any error
+		name    string
+		kind    archive.Kind
+		data    []byte
+		overCap bool  // data is MaxEntries+1 entries of kind, written in the parallel subtest (slow)
+		want    error // nil: any error
 	}{
-		{"tar.gz over the entry cap", archive.TarGz, tarGz(t, many), archive.ErrTooManyEntries},
-		{"zip over the entry cap", archive.Zip, zipBytes(t, many, true), archive.ErrTooManyEntries},
-		{"not gzip", archive.TarGz, []byte("not an archive"), nil},
-		{"not zip", archive.Zip, []byte("not an archive"), nil},
-		{"unlistable kind", archive.None, nil, nil},
+		{name: "tar.gz over the entry cap", kind: archive.TarGz, overCap: true, want: archive.ErrTooManyEntries},
+		{name: "zip over the entry cap", kind: archive.Zip, overCap: true, want: archive.ErrTooManyEntries},
+		{name: "not gzip", kind: archive.TarGz, data: []byte("not an archive")},
+		{name: "not zip", kind: archive.Zip, data: []byte("not an archive")},
+		{name: "unlistable kind", kind: archive.None},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := archive.List(tt.kind, bytes.NewReader(tt.data))
+			data := tt.data
+			switch {
+			case tt.overCap && tt.kind == archive.TarGz:
+				data = tarGz(t, many)
+			case tt.overCap:
+				data = zipBytes(t, many, true)
+			}
+			_, err := archive.List(tt.kind, bytes.NewReader(data))
 			if err == nil || (tt.want != nil && !errors.Is(err, tt.want)) {
 				t.Errorf("List = %v, want %v", err, tt.want)
 			}
 		})
 	}
+}
+
+func TestListBoundsNameMemory(t *testing.T) {
+	t.Parallel()
+	t.Run("xfail: long entry names are kept whole, so a small download fills memory", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: archive/tar accepts names up to 1 MiB and List keeps each one; " +
+			"128 such entries are ~128 KiB of gzip and 128 MiB of retained names (100000 entries: ~100 GiB). " +
+			"List must reject over-long names or cap the bytes it keeps")
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(zw)
+		long := strings.Repeat("a", 1<<20-16) // a GNU long name just under archive/tar's 1 MiB limit
+		for i := range 128 {
+			hdr := &tar.Header{Name: fmt.Sprintf("%s%d", long, i), Mode: 0o755, Typeflag: tar.TypeReg, Format: tar.FormatGNU}
+			if err := tw.WriteHeader(hdr); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := tw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if files, err := archive.List(archive.TarGz, &buf); err == nil {
+			t.Errorf("List kept %d names of 1 MiB each, want an error", len(files))
+		}
+	})
+}
+
+func TestListZipNamesMatchChezmoi(t *testing.T) {
+	t.Parallel()
+	t.Run("xfail: backslashes in zip names are rewritten, chezmoi matches the raw name", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: clean turns `d\\tool.exe` into `d/tool.exe`, but chezmoi's archive-file walk compares " +
+			"path.Clean of the raw zip name, so the proposed path is not found at apply time")
+		got, err := archive.List(archive.Zip, bytes.NewReader(zipBytes(t, []entry{{name: `d\tool.exe`, mode: 0o755}}, false)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []archive.File{{Path: `d\tool.exe`, Exec: true}}; !cmp.Equal(want, got) {
+			t.Errorf("List = %v, want %v (the name chezmoi matches)", got, want)
+		}
+	})
 }

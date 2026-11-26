@@ -206,3 +206,21 @@ func TestPkgAddGitHubBareBinariesHaveNoPath(t *testing.T) {
 		t.Errorf("downloads = %v, file:\n%s", gh.downloads, e.text(t))
 	}
 }
+
+func TestPkgAddGitHubCandidatesAreEscaped(t *testing.T) {
+	t.Parallel()
+	t.Run("xfail: archive file names reach the terminal raw", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: printProposal joins the candidate names unquoted, so control sequences in an " +
+			"untrusted archive (cursor moves, OSC 52) are written to stderr; the path line is quoted")
+		bodies := ghArchives(t, "run\x1b[1A\x1b[2K")
+		e, gh := ghEnv(t, `{}`, ghValidData("example-tool", bodies))
+		gh.bodies = bodies
+		if err := e.run(t, "example-tool", "--github", "octocat/example-tool", "--yes"); err != nil {
+			t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
+		}
+		if strings.ContainsRune(e.errw.String(), '\x1b') {
+			t.Errorf("stderr holds a raw escape character: %q", e.errw.String())
+		}
+	})
+}
