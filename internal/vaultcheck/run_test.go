@@ -41,9 +41,17 @@ func (c *childRunner) Run(ctx context.Context, cmd chez.Cmd) error {
 	return c.err
 }
 
-type exitCodedError struct{ code int }
+type exitCodedError struct {
+	code int
+	msg  string
+}
 
-func (e exitCodedError) Error() string { return "exit status" }
+func (e exitCodedError) Error() string {
+	if e.msg != "" {
+		return e.msg
+	}
+	return "exit status"
+}
 func (e exitCodedError) ExitCode() int { return e.code }
 
 func registry(kind string, extra map[string]any) m {
@@ -167,17 +175,20 @@ func TestExecRunChildFailure(t *testing.T) {
 	t.Run("exit code", func(t *testing.T) {
 		t.Parallel()
 		r := newRig("bws")
-		r.runner.err = exitCodedError{3}
+		r.runner.err = exitCodedError{code: 3, msg: "bad token " + token}
 		err := r.exec.Run(t.Context(), registry("bws", nil), "example-vault", nil, 0)
 		var ec interface{ ExitCode() int }
 		if !errors.As(err, &ec) || ec.ExitCode() != 3 {
 			t.Errorf("error = %v, want ExitCode 3", err)
 		}
+		if err == nil || strings.Contains(err.Error(), token) || !strings.Contains(err.Error(), "[redacted]") {
+			t.Errorf("error = %v, want the token redacted", err)
+		}
 	})
 	t.Run("killed by a signal", func(t *testing.T) {
 		t.Parallel()
 		r := newRig("bws")
-		r.runner.err = exitCodedError{-1}
+		r.runner.err = exitCodedError{code: -1}
 		err := r.exec.Run(t.Context(), registry("bws", nil), "example-vault", nil, 0)
 		var ec interface{ ExitCode() int }
 		if err == nil || errors.As(err, &ec) {
@@ -216,6 +227,43 @@ func TestExecRunHomeCommand(t *testing.T) {
 	if want := filepath.Join("/home/u", "bin/bws"); looked != want || r.runner.calls[0].Args[0] != want {
 		t.Errorf("looked up %q, ran %q, want %q", looked, r.runner.calls[0].Args[0], want)
 	}
+}
+
+func TestExecRunXFail(t *testing.T) {
+	t.Parallel()
+	t.Run("xfail: ~/ with no home dir resolves against the cwd", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: pending fix: an empty Home turns ~/bin/bws into the relative bin/bws")
+		r := newRig()
+		r.exec.Home = "" // os.UserHomeDir failed, as with HOME unset
+		var looked []string
+		cwdHit := lookPath("bin/bws") // a planted ./bin/bws
+		r.exec.LookPath = func(n string) (string, error) { looked = append(looked, n); return cwdHit(n) }
+		data := registry("bws", map[string]any{"command": "~/bin/bws"})
+		if err := r.exec.Run(t.Context(), data, "example-vault", nil, 0); err == nil {
+			t.Error("Run() = nil, want an error for ~/ without a home dir")
+		}
+		for _, n := range looked {
+			if !filepath.IsAbs(n) {
+				t.Errorf("looked up the relative path %q", n)
+			}
+		}
+		if len(r.runner.calls) != 0 || len(r.keyring.asked) != 0 {
+			t.Errorf("runner calls = %d, keyring reads = %d; want none", len(r.runner.calls), len(r.keyring.asked))
+		}
+	})
+	t.Run("xfail: a keyring read failure is reported as a missing token", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: pending fix: the keyring error is dropped and the hint says to set a token that may exist")
+		r := newRig("bws")
+		cause := "chezmoi secret keyring get: exit status 1: no secret service available"
+		r.keyring = &fakeKeyring{err: errors.New(cause)}
+		r.exec.Keyring = r.keyring
+		err := r.exec.Run(t.Context(), registry("bws", nil), "example-vault", nil, 0)
+		if err == nil || !strings.Contains(err.Error(), "no secret service available") {
+			t.Errorf("error = %v, want it to carry the keyring read failure", err)
+		}
+	})
 }
 
 func TestExecRunRealLookPath(t *testing.T) {

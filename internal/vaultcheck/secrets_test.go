@@ -70,6 +70,22 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+// A relative command with a path separator resolves against the working directory of
+// whoever runs chezmoi, so a planted bin/bws there would receive the token.
+func TestValidateRelativeCommand(t *testing.T) {
+	t.Parallel()
+	t.Run("xfail: a relative command path is not flagged", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: pending fix: Validate accepts a command that resolves against the cwd")
+		for _, cmd := range []string{"bin/bws", "./bws", "../tools/bws"} {
+			data := m{"secret": m{"a": m{"kind": "bw", "command": cmd}}}
+			if got := vaultcheck.Validate(data); len(got) == 0 {
+				t.Errorf("Validate(command %q) = no findings, want one (absolute path, ~/path or a bare name on PATH)", cmd)
+			}
+		}
+	})
+}
+
 func TestParse(t *testing.T) {
 	t.Parallel()
 	data := m{"secret": m{
