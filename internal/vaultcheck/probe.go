@@ -111,13 +111,7 @@ func (p Prober) Check(ctx context.Context, e Entry, data map[string]any) Result 
 		}
 		project = s
 	}
-	name := e.Command
-	if name == "" {
-		name = e.Kind
-	} else if rest, ok := strings.CutPrefix(name, "~/"); ok {
-		name = filepath.Join(p.Home, rest)
-	}
-	bin, err := p.LookPath(name)
+	bin, name, err := resolveCLI(e, p.Home, p.LookPath)
 	if err != nil {
 		return r.with(Fail, name+" not found", "install "+e.Kind+" or set command in .chezmoidata/secrets.toml")
 	}
@@ -129,6 +123,19 @@ func (p Prober) Check(ctx context.Context, e Entry, data map[string]any) Result 
 	default:
 		return p.checkRbw(ctx, r, bin)
 	}
+}
+
+// resolveCLI finds the entry's CLI: its declared command (a leading ~/ is the home
+// directory) or else the kind's name, looked up on PATH. name is what was looked up.
+func resolveCLI(e Entry, home string, lookPath func(string) (string, error)) (bin, name string, err error) {
+	name = e.Command
+	if name == "" {
+		name = e.Kind
+	} else if rest, ok := strings.CutPrefix(name, "~/"); ok {
+		name = filepath.Join(home, rest)
+	}
+	bin, err = lookPath(name)
+	return bin, name, err
 }
 
 func (r Result) with(s State, detail, hint string) Result {

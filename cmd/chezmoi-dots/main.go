@@ -40,7 +40,15 @@ func run(ctx context.Context, args []string, getenv func(string) string, stdin i
 		GOOS:    runtime.GOOS,
 		Home:    home,
 	}
-	err := cli.Run(ctx, deps, args)
+	return exitCode(ctx, cli.Run(ctx, deps, args), stderr)
+}
+
+// exitCode maps the result of cli.Run to the process exit code, printing the error when
+// nothing else has.
+func exitCode(ctx context.Context, err error, stderr io.Writer) int {
+	if exit, ok := errors.AsType[*cli.ExitCodeError](err); ok {
+		return exit.Code // the declared CLI's own exit code; it already said what it had to
+	}
 	switch {
 	case err == nil:
 		return 0

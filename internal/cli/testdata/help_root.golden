@@ -12,6 +12,7 @@ COMMANDS
   upgrade    Run system and dotfile upgrade steps
   lint       Check registries and rendered templates
   audit      Audit live shell and secrets configuration
+  secrets    Run a declared secret-manager CLI with its token
   pkg        Package and pinned release lifecycle
   version    Print version information
   help       Show command help
