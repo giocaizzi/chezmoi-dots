@@ -45,7 +45,7 @@ reopens on request.
 ## Findings
 
 `lint registry` prints one finding per line as `<where>: <message>`, where
-`<where>` is the entry name (or a source path for coverage findings):
+`<where>` is the entry name, or the source path for `no edit registry entry`:
 
 - `not a table`
 - `unknown key <key>`
@@ -57,7 +57,7 @@ reopens on request.
 - `check must be a command as a list: ["make", "lint"], with {file} for the edited file`
 - `check must be a list of strings`
 - `source <path> does not exist`
-- `<path>: no edit registry entry`
+- `no edit registry entry`
 
 ## Coverage
 

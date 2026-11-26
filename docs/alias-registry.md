@@ -1,9 +1,9 @@
 # Alias registry
 
 The alias registry declares the shell aliases a dotfiles source defines. It is
-read as chezmoi data, through the keys `alias`, `aliasBlock` and `aliasExternal`
-(the package documentation places it in `.chezmoidata/aliases.toml`, but any
-chezmoi data with these keys is read). [`lint aliases`](cli.md#lint) validates
+read as chezmoi data, through the keys `alias`, `aliasBlock` and `aliasExternal`,
+conventionally declared in `.chezmoidata/aliases.toml` (any chezmoi data with
+these keys is read). [`lint aliases`](cli.md#lint) validates
 the registry and [`audit aliases`](cli.md#audit) compares it with the aliases
 live in your shells.
 
@@ -26,7 +26,7 @@ registry is only data that those templates and the two commands share.
 | `why` | Reason; required when `shells` has a single shell. |
 
 `[aliasBlock.<name>]` is exactly a `message` string and nothing else.
-`[aliasExternal.<shell>.<name>]` is a boolean.
+Under `[aliasExternal.<shell>]`, each `<name> = true` or `false` is a boolean.
 
 ```toml
 [alias.ll]
