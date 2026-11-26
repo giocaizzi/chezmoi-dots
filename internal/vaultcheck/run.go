@@ -61,13 +61,19 @@ func (x Exec) Run(ctx context.Context, data map[string]any, name string, args []
 		return fmt.Errorf("%w: kind %s has no token injection; use the CLI's own session", ErrNoInjection, e.Kind)
 	}
 	bin, cli, err := resolveCLI(e, x.Home, x.LookPath)
+	if ce, ok := errors.AsType[*commandError](err); ok {
+		return ce
+	}
 	if err != nil {
 		return fmt.Errorf("%s not found: install %s or set command in .chezmoidata/secrets.toml", cli, e.Kind)
 	}
 	token, err := x.Keyring.Get(ctx, e.Service, e.User)
-	if err != nil || token == "" {
+	switch {
+	case err == nil && token == "", errors.Is(err, ErrNoToken):
 		return fmt.Errorf("no access token in the keyring (service %s, user %s): chezmoi secret keyring set --service=%s --user=%s",
 			e.Service, e.User, e.Service, e.User)
+	case err != nil:
+		return fmt.Errorf("read the access token (service %s, user %s): %w", e.Service, e.User, err)
 	}
 	redact := func(s string) string { return strings.ReplaceAll(s, token, "[redacted]") }
 
@@ -80,6 +86,7 @@ func (x Exec) Run(ctx context.Context, data map[string]any, name string, args []
 	err = x.Runner.Run(rctx, chez.Cmd{
 		Args:  append([]string{bin}, args...),
 		Env:   []string{"BWS_ACCESS_TOKEN=" + token},
+		Group: true, // a wrapper's grandchildren die with it, and with the token
 		Stdin: x.Stdin, Stdout: x.Stdout, Stderr: x.Stderr,
 	})
 	if err == nil {
@@ -87,6 +94,13 @@ func (x Exec) Run(ctx context.Context, data map[string]any, name string, args []
 	}
 	if timeout > 0 && errors.Is(rctx.Err(), context.DeadlineExceeded) {
 		return fmt.Errorf("%s timed out after %s", e.Kind, timeout)
+	}
+	// Ctrl-C or a cancelled parent: a plain error, so main maps it to 130.
+	if ctx.Err() != nil {
+		return fmt.Errorf("%s: %w", e.Kind, ctx.Err())
+	}
+	if code, ok := signalExit(err); ok {
+		return &exitError{code: code, msg: redact(err.Error())}
 	}
 	var ec interface{ ExitCode() int }
 	// A child killed by a signal reports -1: that is no exit code to propagate.

@@ -159,8 +159,16 @@ func TestAuditSecrets(t *testing.T) {
 			wantCalls: true,
 		},
 		{
-			name: "invalid registry", registry: "[secret.a]\n", runner: &secretRunner{}, args: []string{"audit", "secrets"},
-			wantErr: cli.ErrReported, wantErrOut: []string{"✗ secrets", "secret a: missing kind", "fix the registry (chezmoi dots lint secrets)"},
+			name: "invalid registry", registry: "[secret.a]\nkind = \"pass\"\n", runner: &secretRunner{}, args: []string{"audit", "secrets"},
+			wantErr: cli.ErrReported, wantErrOut: []string{"✗ secrets", "secret a: unknown kind", "fix the registry (chezmoi dots lint secrets)"},
+		},
+		{
+			name: "tables without a kind are ignored", registry: "[secret.a]\nfoo = \"bar\"\n", runner: &secretRunner{}, args: []string{"audit", "secrets"},
+			wantOut: []string{"secrets: no entries declared (.chezmoidata/secrets.toml)", "secrets: ignored data.secret entries without a kind: a (see docs/secrets.md)"},
+		},
+		{
+			name: "lint secrets notes the ignored entries", registry: "[secret.a]\nfoo = \"bar\"\n[secret.b]\nbaz = 1\n", runner: &secretRunner{}, args: []string{"lint", "secrets"},
+			wantErrOut: []string{"  note: secrets: ignored data.secret entries without a kind: a, b (see docs/secrets.md)"},
 		},
 		{
 			name: "no entries", registry: "", runner: &secretRunner{}, args: []string{"audit", "secrets"},

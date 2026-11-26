@@ -3,6 +3,7 @@ package vaultcheck_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -89,6 +90,7 @@ func TestCheck(t *testing.T) {
 		keyring *fakeKeyring
 		reply   script
 		timeout time.Duration
+		noHome  bool
 		want    vaultcheck.Result
 		argv    []string // the one CLI call expected; nil means none
 	}{
@@ -109,10 +111,19 @@ func TestCheck(t *testing.T) {
 			want: vaultcheck.Result{Name: "example-vault", Kind: "bws", State: vaultcheck.Fail, Detail: "bws not found", Hint: "install bws or set command in .chezmoidata/secrets.toml"},
 		},
 		{
-			name: "keyring missing", entry: bwsEntry, data: withProject, have: []string{"bws"}, keyring: &fakeKeyring{err: errors.New("boom")},
+			name: "keyring missing", entry: bwsEntry, data: withProject, have: []string{"bws"}, keyring: &fakeKeyring{err: fmt.Errorf("%w: not found", vaultcheck.ErrNoToken)},
 			want: vaultcheck.Result{
 				Name: "example-vault", Kind: "bws", State: vaultcheck.Fail, Detail: "no access token in the keyring (service bws, user access-token)",
 				Hint: "chezmoi secret keyring set --service=bws --user=access-token",
+			},
+		},
+		{
+			name: "keyring read failure", entry: bwsEntry, data: withProject, have: []string{"bws"},
+			keyring: &fakeKeyring{err: errors.New("chezmoi secret keyring get: exit status 1: no secret service available\nsecond line")},
+			want: vaultcheck.Result{
+				Name: "example-vault", Kind: "bws", State: vaultcheck.Fail,
+				Detail: "keyring read failed: chezmoi secret keyring get: exit status 1: no secret service available",
+				Hint:   "check that chezmoi can read the OS keyring: chezmoi secret keyring get --service=bws --user=access-token",
 			},
 		},
 		{
@@ -162,6 +173,20 @@ func TestCheck(t *testing.T) {
 			name: "command override with home", entry: vaultcheck.Entry{Name: "x", Kind: "rbw", Command: "~/bin/rbw"}, have: []string{filepath.Join("/home/octocat", "bin", "rbw")},
 			want: vaultcheck.Result{Name: "x", Kind: "rbw", State: vaultcheck.OK, Detail: "agent unlocked"},
 			argv: []string{"/fake/" + filepath.Join("/home/octocat", "bin", "rbw"), "unlocked"},
+		},
+		{
+			name: "relative command", entry: vaultcheck.Entry{Name: "x", Kind: "rbw", Command: "bin/rbw"}, have: []string{"bin/rbw"},
+			want: vaultcheck.Result{
+				Name: "x", Kind: "rbw", State: vaultcheck.Fail, Detail: "command bin/rbw is not an absolute path",
+				Hint: "set command in .chezmoidata/secrets.toml to an absolute path, ~/..., or a bare name",
+			},
+		},
+		{
+			name: "home unknown", entry: vaultcheck.Entry{Name: "x", Kind: "rbw", Command: "~/bin/rbw"}, noHome: true, have: []string{"bin/rbw"},
+			want: vaultcheck.Result{
+				Name: "x", Kind: "rbw", State: vaultcheck.Fail, Detail: "cannot expand ~/ in command: home directory unknown",
+				Hint: "set command in .chezmoidata/secrets.toml to an absolute path, ~/..., or a bare name",
+			},
 		},
 		{
 			name: "bw unlocked", entry: vaultcheck.Entry{Name: "pw", Kind: "bw"}, have: []string{"bw"},
@@ -229,6 +254,9 @@ func TestCheck(t *testing.T) {
 				kr = &fakeKeyring{}
 			}
 			p := vaultcheck.Prober{Runner: fr, LookPath: lookPath(tt.have...), Keyring: kr, Home: "/home/octocat", Timeout: tt.timeout}
+			if tt.noHome {
+				p.Home = ""
+			}
 			got := p.Check(t.Context(), tt.entry, tt.data)
 			if diff := cmp.Diff(tt.want, got); diff != "" {
 				t.Errorf("Check() mismatch (-want +got):\n%s", diff)
@@ -287,7 +315,7 @@ func TestCheckAll(t *testing.T) {
 		t.Errorf("unconfigured bws must not probe; results %+v, calls %v", got, fr.calls)
 	}
 
-	got, fs = p.CheckAll(t.Context(), m{"secret": m{"a": m{}}})
+	got, fs = p.CheckAll(t.Context(), m{"secret": m{"a": m{"kind": "pass"}}})
 	if got != nil || len(fs) == 0 {
 		t.Errorf("CheckAll(invalid) = %v, %v; want findings only", got, fs)
 	}
@@ -309,10 +337,14 @@ func TestChezmoiKeyring_Get(t *testing.T) {
 		reply   script
 		want    string
 		wantErr string // substring; empty means success
+		noToken bool   // the error is ErrNoToken
 	}{
 		{name: "trimmed value", reply: script{stdout: token + "\n"}, want: token},
-		{name: "error carries stderr not stdout", reply: script{stdout: "stdout-secret", stderr: "keyring: not found\n", err: errors.New("exit status 1")}, wantErr: "keyring: not found"},
-		{name: "empty", reply: script{stdout: "\n"}, wantErr: "empty"},
+		{name: "error carries stderr not stdout", reply: script{stdout: "stdout-secret", stderr: "keyring: not found\n", err: errors.New("exit status 1")}, wantErr: "keyring: not found", noToken: true},
+		{name: "empty", reply: script{stdout: "\n"}, wantErr: "empty", noToken: true},
+		{name: "not found any case", reply: script{stderr: "Error: Secret Not Found\n", err: errors.New("exit status 1")}, wantErr: "Not Found", noToken: true},
+		{name: "other failure first line", reply: script{stdout: "stdout-secret", stderr: "\n no secret service\nmore\n", err: errors.New("exit status 1")}, wantErr: "exit status 1: no secret service"},
+		{name: "failure without stderr", reply: script{err: errors.New("exit status 1")}, wantErr: "exit status 1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -326,6 +358,9 @@ func TestChezmoiKeyring_Get(t *testing.T) {
 			}
 			if (err == nil) != (tt.wantErr == "") || got != tt.want {
 				t.Fatalf("Get() = %q, %v; want %q, error containing %q", got, err, tt.want, tt.wantErr)
+			}
+			if errors.Is(err, vaultcheck.ErrNoToken) != tt.noToken {
+				t.Errorf("errors.Is(err, ErrNoToken) = %v, want %v", !tt.noToken, tt.noToken)
 			}
 			if err != nil && (!strings.Contains(err.Error(), tt.wantErr) || strings.Contains(err.Error(), "stdout-secret")) {
 				t.Errorf("error %q lacks stderr or carries stdout", err)

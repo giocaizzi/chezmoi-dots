@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -94,6 +95,9 @@ func TestExecRunOK(t *testing.T) {
 		t.Fatalf("runner calls = %d, want 1", len(r.runner.calls))
 	}
 	c := r.runner.calls[0]
+	if !c.Group {
+		t.Error("the child is not in its own process group")
+	}
 	if diff := cmp.Diff(append([]string{"/fake/bws"}, args...), c.Args); diff != "" {
 		t.Errorf("argv (-want +got):\n%s", diff)
 	}
@@ -137,9 +141,9 @@ func TestExecRunErrors(t *testing.T) {
 		{name: "not declared", data: registry("bws", nil), have: []string{"bws"}, cmdName: "other", want: vaultcheck.ErrNotDeclared, text: `secret "other"`},
 		{name: "kind bw", data: registry("bw", nil), have: []string{"bw"}, cmdName: "example-vault", want: vaultcheck.ErrNoInjection, text: "kind bw"},
 		{name: "kind rbw", data: registry("rbw", nil), have: []string{"rbw"}, cmdName: "example-vault", want: vaultcheck.ErrNoInjection, text: "kind rbw"},
-		{name: "invalid registry", data: m{"secret": m{"example-vault": m{}}}, have: []string{"bws"}, cmdName: "example-vault", text: "the secrets registry is invalid (chezmoi dots lint secrets)"},
+		{name: "invalid registry", data: m{"secret": m{"example-vault": m{"kind": "pass"}}}, have: []string{"bws"}, cmdName: "example-vault", text: "the secrets registry is invalid (chezmoi dots lint secrets)"},
 		{name: "cli missing", data: registry("bws", nil), cmdName: "example-vault", text: "bws not found: install bws or set command in .chezmoidata/secrets.toml"},
-		{name: "keyring error", data: registry("bws", nil), have: []string{"bws"}, keyring: &fakeKeyring{err: errors.New("boom")}, cmdName: "example-vault", text: "(service bws, user access-token): chezmoi secret keyring set --service=bws --user=access-token", keyAsk: 1},
+		{name: "keyring error", data: registry("bws", nil), have: []string{"bws"}, keyring: &fakeKeyring{err: fmt.Errorf("%w: not found", vaultcheck.ErrNoToken)}, cmdName: "example-vault", text: "(service bws, user access-token): chezmoi secret keyring set --service=bws --user=access-token", keyAsk: 1},
 		{name: "keyring empty", data: registry("bws", nil), have: []string{"bws"}, keyring: &fakeKeyring{}, cmdName: "example-vault", text: "no access token in the keyring", keyAsk: 1},
 	}
 	for _, tt := range tests {
@@ -195,6 +199,18 @@ func TestExecRunChildFailure(t *testing.T) {
 			t.Errorf("error = %v, want a plain error without an exit code", err)
 		}
 	})
+	t.Run("cancelled parent is no exit code", func(t *testing.T) {
+		t.Parallel()
+		r := newRig("bws")
+		r.runner.err = exitCodedError{code: 2, msg: "interrupted"}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		err := r.exec.Run(ctx, registry("bws", nil), "example-vault", nil, 0)
+		var ec interface{ ExitCode() int }
+		if err == nil || errors.As(err, &ec) || !errors.Is(err, context.Canceled) {
+			t.Errorf("error = %v, want a plain error wrapping context.Canceled", err)
+		}
+	})
 	t.Run("token redacted", func(t *testing.T) {
 		t.Parallel()
 		r := newRig("bws")
@@ -231,9 +247,8 @@ func TestExecRunHomeCommand(t *testing.T) {
 
 func TestExecRunXFail(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: ~/ with no home dir resolves against the cwd", func(t *testing.T) {
+	t.Run("~/ with no home dir is refused", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: pending fix: an empty Home turns ~/bin/bws into the relative bin/bws")
 		r := newRig()
 		r.exec.Home = "" // os.UserHomeDir failed, as with HOME unset
 		var looked []string
@@ -252,9 +267,8 @@ func TestExecRunXFail(t *testing.T) {
 			t.Errorf("runner calls = %d, keyring reads = %d; want none", len(r.runner.calls), len(r.keyring.asked))
 		}
 	})
-	t.Run("xfail: a keyring read failure is reported as a missing token", func(t *testing.T) {
+	t.Run("a keyring read failure is reported with its cause", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: pending fix: the keyring error is dropped and the hint says to set a token that may exist")
 		r := newRig("bws")
 		cause := "chezmoi secret keyring get: exit status 1: no secret service available"
 		r.keyring = &fakeKeyring{err: errors.New(cause)}
@@ -262,6 +276,12 @@ func TestExecRunXFail(t *testing.T) {
 		err := r.exec.Run(t.Context(), registry("bws", nil), "example-vault", nil, 0)
 		if err == nil || !strings.Contains(err.Error(), "no secret service available") {
 			t.Errorf("error = %v, want it to carry the keyring read failure", err)
+		}
+		if err != nil && (strings.Contains(err.Error(), "no access token") || !strings.Contains(err.Error(), "read the access token (service bws, user access-token): ")) {
+			t.Errorf("error = %v, want the read-failure form", err)
+		}
+		if len(r.runner.calls) != 0 {
+			t.Errorf("runner calls = %d, want 0", len(r.runner.calls))
 		}
 	})
 }
