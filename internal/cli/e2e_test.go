@@ -17,25 +17,19 @@ import (
 // These tests drive the real command line against a real chezmoi and a small fixture
 // source; they skip when chezmoi is not installed.
 
-const configTemplate = `{{- $roles := dict -}}
-{{- range list "light" "work" }}
-{{- if kindIs "bool" (get $ .) }}{{ $_ := set $roles . (ternary "yes" "no" (get $ .)) }}{{ end }}
-{{- end }}
-{{- $light := eq (promptChoiceOnce $roles "light" "Light?" (list "yes" "no") (get $roles "light" | default "no")) "yes" -}}
-{{- $work := eq (promptChoiceOnce $roles "work" "Work?" (list "yes" "no") (get $roles "work" | default "no")) "yes" -}}
-{{- $user := promptStringOnce . "gitUser" "Name" "" -}}
-{{- $tools := list -}}
-{{- if not $light }}{{- $tools = promptMultichoiceOnce . "tools" "Tools" (list "alpha" "beta") (get . "tools" | default list) -}}{{- end }}
+const configTemplate = `{{- $user := promptStringOnce . "gitUser" "Name" "" -}}
+{{- $tools := promptMultichoiceOnce . "tools" "Tools" (list "alpha" "beta") (get . "tools" | default list) -}}
 {{- $featureX := promptBoolOnce . "featureX" "Feature X?" false -}}
 [data]
     gitUser = {{ $user | quote }}
-    light = {{ $light }}
-    work = {{ $work }}
     featureX = {{ $featureX }}
-{{- if not $light }}
     tools = {{ $tools | toJson }}
+{{- if eq .chezmoi.os "windows" }}
+    winOnly = true
 {{- end }}
 `
+
+const matrixDeclaration = "[matrix.profile.home]\nfeatureX = true\n[matrix.profile.minimal]\n"
 
 const registry = `[edit.note]
 desc = "A note"
@@ -70,9 +64,9 @@ func newEnv(t *testing.T) *env {
 	}
 	write(filepath.Join(e.src, ".chezmoi.toml.tmpl"), configTemplate)
 	write(filepath.Join(e.src, ".chezmoidata", "edit.toml"), registry)
-	write(filepath.Join(e.src, "dot_note.tmpl"), "hello {{ if get . \"work\" }}work{{ else }}home{{ end }}\n")
+	write(filepath.Join(e.src, "dot_note.tmpl"), "hello {{ if get . \"featureX\" }}feature{{ else }}home{{ end }}\n")
 	cfg := filepath.Join(root, "chezmoi.toml")
-	write(cfg, "destDir = "+quote(e.dest)+"\npersistentState = "+quote(filepath.Join(root, "state.boltdb"))+"\n[data]\n    work = false\n    light = false\n    tools = []\n")
+	write(cfg, "destDir = "+quote(e.dest)+"\npersistentState = "+quote(filepath.Join(root, "state.boltdb"))+"\n[data]\n    featureX = false\n    tools = []\n")
 	if err := os.MkdirAll(e.dest, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -151,9 +145,13 @@ func TestListShowsTheRegistry(t *testing.T) {
 func TestViewRendersAConfiguration(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,work")
-	if err != nil || !strings.Contains(out, "hello work") {
-		t.Errorf("view --as linux,work = %q, %v, want the work render", out, err)
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,home")
+	if err != nil || !strings.Contains(out, "hello feature") {
+		t.Errorf("view --as linux,home = %q, %v, want the home render", out, err)
+	}
+	if out, _, err = e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,minimal"); err != nil || !strings.Contains(out, "hello home") {
+		t.Errorf("view --as linux,minimal = %q, %v, want the minimal render", out, err)
 	}
 }
 
@@ -191,7 +189,7 @@ func TestEditAppliesWhenConfirmed(t *testing.T) {
 	if !strings.HasSuffix(string(src), "more") {
 		t.Errorf("source = %q, want the edit", src)
 	}
-	for _, want := range []string{"linux/work", "reload the note"} {
+	for _, want := range []string{"linux/default", "reload the note"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want it to mention %q", stderr, want)
 		}
@@ -324,49 +322,76 @@ func (e *env) writeFile(t *testing.T, rel, text string) {
 	}
 }
 
-func TestLintMatrixUnknownRole(t *testing.T) {
+func TestLintMatrixInvalidDeclaration(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	e.writeFile(t, ".chezmoidata/matrix.toml", "[matrix.role.boss]\nfeatureX = true\n")
+	e.writeFile(t, ".chezmoidata/matrix.toml", "[matrix.profile.Boss]\nfeatureX = true\n")
 	_, stderr, err := e.run(t, "", "lint", "matrix")
-	if err == nil || !strings.Contains(stderr, "matrix.role.boss") || !strings.Contains(stderr, "unknown role") {
-		t.Errorf("lint matrix = %v, stderr %q, want a finding naming the unknown role", err, stderr)
+	if err == nil || !strings.Contains(stderr, "matrix.profile.Boss") || !strings.Contains(stderr, "invalid profile name") {
+		t.Errorf("lint matrix = %v, stderr %q, want a finding naming the invalid profile", err, stderr)
 	}
 }
 
-// A role answer is seeded into the config template, so a script gated on it breaks
-// only for that role.
-func TestLintTemplatesSeedsRoleAnswers(t *testing.T) {
+// A profile answer is seeded into the config template, so a script gated on it breaks
+// only for that profile.
+func TestLintTemplatesSeedsProfileAnswers(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	e.writeFile(t, ".chezmoidata/matrix.toml", "[matrix.role.work]\nfeatureX = true\n")
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
 	e.writeFile(t, ".chezmoiscripts/probe.json.tmpl", "{{ if .featureX }}{ broken{{ end }}")
 	_, stderr, err := e.run(t, "", "lint", "templates")
-	if err == nil || !strings.Contains(stderr, "(darwin/work)") || strings.Contains(stderr, "/personal)") {
-		t.Errorf("lint templates = %v, stderr %q, want findings for the work role only", err, stderr)
+	if err == nil || !strings.Contains(stderr, "(darwin/home)") || strings.Contains(stderr, "/minimal)") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the home profile only", err, stderr)
+	}
+}
+
+// The config template sees the OS it is rendered for, so an answer it derives from the
+// OS reaches only that OS's configurations.
+func TestLintTemplatesRendersConfigPerOS(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoiscripts/probe.json.tmpl", "{{ if get . \"winOnly\" }}{ broken{{ end }}")
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "(windows/default)") || strings.Contains(stderr, "(darwin/") || strings.Contains(stderr, "(linux/") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the windows configuration only", err, stderr)
 	}
 }
 
 func TestLintTemplatesVariant(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	e.writeFile(t, ".chezmoidata/matrix.toml", "[[matrix.variant]]\nname = \"one tool\"\nroles = [\"work\"]\nset = { tools = [\"alpha\"] }\n")
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration+"[[matrix.variant]]\nname = \"one tool\"\nprofiles = [\"home\"]\nset = { tools = [\"alpha\"] }\n")
 	e.writeFile(t, ".chezmoiscripts/probe.json.tmpl", `{{ if has "alpha" (get . "tools" | default list) }}{ broken{{ end }}`)
 	_, stderr, err := e.run(t, "", "lint", "templates")
-	if err == nil || !strings.Contains(stderr, "(darwin/work [one tool])") || strings.Contains(stderr, "/personal") || strings.Contains(stderr, "(darwin/work)") {
-		t.Errorf("lint templates = %v, stderr %q, want findings for the work variant only", err, stderr)
+	if err == nil || !strings.Contains(stderr, "(darwin/home [one tool])") || strings.Contains(stderr, "/minimal") || strings.Contains(stderr, "(darwin/home)") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the home variant only", err, stderr)
+	}
+}
+
+// --as without a profile is ambiguous once several are declared.
+func TestViewAsNeedsAProfile(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	_, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux")
+	if err == nil || !strings.Contains(err.Error(), "home, minimal") {
+		t.Errorf("view --as linux = %v, want an error listing the profiles", err)
+	}
+	if out, _, err := newEnv(t).run(t, "", "view", "--matrix"); err != nil || !strings.Contains(out, "D=default") {
+		t.Errorf("view --matrix without a declaration = %q, %v, want the default profile", out, err)
 	}
 }
 
 // Review findings on the generic matrix, reproduced against real chezmoi.
 func TestMatrixReview(t *testing.T) {
 	t.Parallel()
-	// A [data] key this machine's config holds but no role's render writes (a feature
+	// A [data] key this machine's config holds but no profile's render writes (a feature
 	// sub-answer, a key an older template wrote) reaches every configuration of view
 	// and edit, which render over this machine's config.
 	t.Run("a key only this machine's config holds does not leak into view --as", func(t *testing.T) {
 		t.Parallel()
 		e := newEnv(t)
+		e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
 		cfg := e.vars["CHEZMOI_CONFIG_FILE"]
 		b, err := os.ReadFile(cfg)
 		if err != nil {
@@ -376,9 +401,9 @@ func TestMatrixReview(t *testing.T) {
 			t.Fatal(err)
 		}
 		e.writeFile(t, "dot_probe.tmpl", "probe={{ get . \"machineOnly\" | default \"none\" }}\n")
-		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".probe"), "--as", "linux,work")
+		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".probe"), "--as", "linux,home")
 		if err != nil || strings.Contains(out, "from-this-machine") {
-			t.Errorf("view --as linux,work = %q, %v, want no value from this machine's config", out, err)
+			t.Errorf("view --as linux,home = %q, %v, want no value from this machine's config", out, err)
 		}
 	})
 }
