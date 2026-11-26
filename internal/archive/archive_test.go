@@ -519,11 +519,8 @@ func TestListLimitsAtTheTop(t *testing.T) {
 			t.Errorf("ListLimits = %v, %v; want one file", files, err)
 		}
 	})
-	t.Run("xfail: every limit at math.MaxInt64 lists a zip", func(t *testing.T) {
+	t.Run("every limit at math.MaxInt64 lists a zip", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: listZip spools through io.LimitReader(r, l.MaxZipSpool+1), which overflows to a " +
-			"negative limit and spools 0 bytes, so every zip fails as malformed; the Limits doc says " +
-			"math.MaxInt64 is a cap no archive reaches")
 		l := archive.Limits{
 			MaxNameLen: math.MaxInt, MaxNameBytes: math.MaxInt64, MaxDecompressed: math.MaxInt64,
 			MaxZipSpool: math.MaxInt64, MaxCentralDir: math.MaxInt64,

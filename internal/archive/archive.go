@@ -219,7 +219,7 @@ func listZip(r io.Reader, l Limits) (files []File, err error) {
 	defer func() {
 		err = errors.Join(err, tmp.Close(), os.Remove(tmp.Name()))
 	}()
-	size, err := io.Copy(tmp, io.LimitReader(r, l.MaxZipSpool+1))
+	size, err := io.Copy(tmp, io.LimitReader(r, min(l.MaxZipSpool, math.MaxInt64-1)+1)) // no overflow at MaxInt64
 	if err != nil {
 		return nil, fmt.Errorf("spool zip: %w", err)
 	}
