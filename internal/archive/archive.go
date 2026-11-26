@@ -23,10 +23,11 @@ const MaxEntries = 100000
 // ErrTooManyEntries is returned by List when the archive holds more than MaxEntries entries.
 var ErrTooManyEntries = errors.New("archive has too many entries")
 
-// Errors List returns when an archive exceeds a name limit.
+// Errors List returns when an archive exceeds a limit.
 var (
 	ErrNameTooLong   = errors.New("archive entry name is too long")
 	ErrNamesTooLarge = errors.New("archive entry names are too large")
+	ErrTooLarge      = errors.New("archive is too large to list")
 )
 
 // Limits bounds what List reads and keeps from one archive. An archive over a limit
@@ -34,12 +35,14 @@ var (
 type Limits struct {
 	MaxNameLen   int   // longest entry name, in bytes
 	MaxNameBytes int64 // total bytes of the names kept
+
+	MaxDecompressed int64 // bytes of the decompressed tar stream List reads
 }
 
 // DefaultLimits returns the limits List applies: names up to 4096 bytes and 16 MiB of
-// names in all.
+// names in all, and 4 GiB of decompressed tar stream.
 func DefaultLimits() Limits {
-	return Limits{MaxNameLen: 4096, MaxNameBytes: 16 << 20}
+	return Limits{MaxNameLen: 4096, MaxNameBytes: 16 << 20, MaxDecompressed: 4 << 30}
 }
 
 // names checks the names of the entries List keeps against the limits.
@@ -111,12 +114,33 @@ func clean(name string) string {
 	return strings.TrimPrefix(path.Clean(strings.ReplaceAll(name, "\\", "/")), "./")
 }
 
+// capReader fails with ErrTooLarge once more than left bytes have been read.
+type capReader struct {
+	r    io.Reader
+	left int64
+}
+
+func (c *capReader) Read(p []byte) (int, error) {
+	if c.left < 0 {
+		return 0, ErrTooLarge
+	}
+	if int64(len(p)) > c.left+1 {
+		p = p[:c.left+1]
+	}
+	n, err := c.r.Read(p)
+	c.left -= int64(n)
+	if c.left < 0 {
+		return 0, ErrTooLarge
+	}
+	return n, err
+}
+
 func listTarGz(r io.Reader, l Limits) ([]File, error) {
 	zr, err := gzip.NewReader(r)
 	if err != nil {
 		return nil, fmt.Errorf("read gzip: %w", err)
 	}
-	tr := tar.NewReader(zr)
+	tr := tar.NewReader(&capReader{r: zr, left: l.MaxDecompressed})
 	files := []File{}
 	kept := names{l: l}
 	for entries := 0; ; entries++ {

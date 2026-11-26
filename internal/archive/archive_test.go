@@ -282,3 +282,33 @@ func TestListZipNamesMatchChezmoi(t *testing.T) {
 		}
 	})
 }
+
+func TestListCapsDecompressedStream(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	const size = 1 << 20
+	if err := tw.WriteHeader(&tar.Header{Name: "big", Mode: 0o644, Typeflag: tar.TypeReg, Size: size}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(make([]byte, size)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	l := archive.DefaultLimits()
+	l.MaxDecompressed = size / 2
+	if _, err := archive.ListLimits(archive.TarGz, bytes.NewReader(buf.Bytes()), l); !errors.Is(err, archive.ErrTooLarge) {
+		t.Errorf("ListLimits = %v, want %v", err, archive.ErrTooLarge)
+	}
+	l.MaxDecompressed = 2 * size
+	got, err := archive.ListLimits(archive.TarGz, bytes.NewReader(buf.Bytes()), l)
+	if err != nil || len(got) != 1 {
+		t.Errorf("ListLimits under the cap = %v, %v; want one file", got, err)
+	}
+}
