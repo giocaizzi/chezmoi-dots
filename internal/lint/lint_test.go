@@ -108,3 +108,40 @@ func TestLinterArgv(t *testing.T) {
 		})
 	}
 }
+
+// Discovery skips a template whose own actions call a secret function, but not one
+// that reaches such a function through a partial; lint templates then renders it and
+// runs the password manager.
+func TestTemplateFilesSkipsSecretPartials(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, body string }{
+		{name: "xfail: a template whose partial calls a password manager", body: "{{ template \"creds.tmpl\" . }}\n"},
+		{name: "xfail: a template that includeTemplates a secret partial", body: "{{ includeTemplate \"creds.tmpl\" . }}\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			t.Skip("xfail: callsSecret reads only the template's own actions, not the partials it calls")
+			src := t.TempDir()
+			for name, body := range map[string]string{
+				".chezmoitemplates/creds.tmpl": "{{ bitwarden \"item\" \"id\" }}\n",
+				"dot_config/creds.sh.tmpl":     tt.body,
+			} {
+				p := filepath.Join(src, filepath.FromSlash(name))
+				if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := Linter{Src: src}.templateFiles()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 0 {
+				t.Errorf("templateFiles() = %v, want nothing: rendering it calls a secret function", got)
+			}
+		})
+	}
+}

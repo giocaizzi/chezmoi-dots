@@ -406,18 +406,54 @@ func TestMatrixReview(t *testing.T) {
 		t.Parallel()
 		e := newEnv(t)
 		e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
-		cfg := e.vars["CHEZMOI_CONFIG_FILE"]
-		b, err := os.ReadFile(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = os.WriteFile(cfg, append(b, "    machineOnly = \"from-this-machine\"\n"...), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		e.appendConfig(t, "    machineOnly = \"from-this-machine\"\n")
 		e.writeFile(t, "dot_probe.tmpl", "probe={{ get . \"machineOnly\" | default \"none\" }}\n")
 		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".probe"), "--as", "linux,home")
 		if err != nil || strings.Contains(out, "from-this-machine") {
 			t.Errorf("view --as linux,home = %q, %v, want no value from this machine's config", out, err)
 		}
 	})
+	// --override-data merges tables recursively, so the {} a table key is zeroed to
+	// keeps every nested key of this machine's config.
+	t.Run("xfail: a table only this machine's config holds does not leak into view --as", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: uniform zeroes a table key to {}, which chezmoi merges over this machine's table")
+		e := newEnv(t)
+		e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+		e.appendConfig(t, "[data.machineTable]\n    secret = \"from-this-machine\"\n")
+		e.writeFile(t, "dot_probe.tmpl", "probe={{ dig \"machineTable\" \"secret\" \"none\" . }}\n")
+		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".probe"), "--as", "linux,home")
+		if err != nil || strings.Contains(out, "from-this-machine") {
+			t.Errorf("view --as linux,home = %q, %v, want no value from this machine's config", out, err)
+		}
+	})
+	// Config [data] overrides .chezmoidata, so a key this machine's config overrides is
+	// zeroed in every configuration instead of falling back to the source's value,
+	// which is what chezmoi init with that profile would give.
+	t.Run("xfail: a machine override of a .chezmoidata key renders the source's value", func(t *testing.T) {
+		t.Parallel()
+		t.Skip("xfail: uniform zeroes the key, hiding the .chezmoidata value")
+		e := newEnv(t)
+		e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+		e.writeFile(t, ".chezmoidata/shared.toml", "shared = \"from-source\"\n")
+		e.appendConfig(t, "    shared = \"from-this-machine\"\n")
+		e.writeFile(t, "dot_probe.tmpl", "probe={{ .shared }}\n")
+		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".probe"), "--as", "linux,home")
+		if err != nil || !strings.Contains(out, "probe=from-source") {
+			t.Errorf("view --as linux,home = %q, %v, want the .chezmoidata value", out, err)
+		}
+	})
+}
+
+// appendConfig appends text to this machine's chezmoi config, whose last table is [data].
+func (e *env) appendConfig(t *testing.T, text string) {
+	t.Helper()
+	cfg := e.vars["CHEZMOI_CONFIG_FILE"]
+	b, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(cfg, append(b, text...), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
