@@ -269,10 +269,8 @@ func TestListBoundsNameMemory(t *testing.T) {
 
 func TestListZipNamesMatchChezmoi(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: backslashes in zip names are rewritten, chezmoi matches the raw name", func(t *testing.T) {
+	t.Run("backslashes in zip names are kept, chezmoi matches the raw name", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: clean turns `d\\tool.exe` into `d/tool.exe`, but chezmoi's archive-file walk compares " +
-			"path.Clean of the raw zip name, so the proposed path is not found at apply time")
 		got, err := archive.List(archive.Zip, bytes.NewReader(zipBytes(t, []entry{{name: `d\tool.exe`, mode: 0o755}}, false)))
 		if err != nil {
 			t.Fatal(err)

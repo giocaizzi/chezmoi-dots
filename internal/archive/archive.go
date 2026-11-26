@@ -86,7 +86,7 @@ func KindOf(name string) Kind {
 
 // File is a regular file of an archive.
 type File struct {
-	Path string // slash separated, without a leading "./"
+	Path string // path.Clean of the raw entry name, as chezmoi matches it
 	Exec bool   // an executable bit is set, or the archive does not record modes
 }
 
@@ -110,8 +110,10 @@ func ListLimits(kind Kind, r io.Reader, l Limits) ([]File, error) {
 	return nil, errors.New("archive format is not listable")
 }
 
+// clean normalizes a name the way chezmoi's archive-file walk does: path.Clean of the
+// raw name. A backslash in a zip name stays a backslash.
 func clean(name string) string {
-	return strings.TrimPrefix(path.Clean(strings.ReplaceAll(name, "\\", "/")), "./")
+	return path.Clean(name)
 }
 
 // capReader fails with ErrTooLarge once more than left bytes have been read.
