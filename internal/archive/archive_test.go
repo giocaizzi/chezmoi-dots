@@ -219,11 +219,8 @@ func TestListErrors(t *testing.T) {
 
 func TestListBoundsNameMemory(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: long entry names are kept whole, so a small download fills memory", func(t *testing.T) {
+	t.Run("long entry names are rejected, so a small download cannot fill memory", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: archive/tar accepts names up to 1 MiB and List keeps each one; " +
-			"128 such entries are ~128 KiB of gzip and 128 MiB of retained names (100000 entries: ~100 GiB). " +
-			"List must reject over-long names or cap the bytes it keeps")
 		var buf bytes.Buffer
 		zw := gzip.NewWriter(&buf)
 		tw := tar.NewWriter(zw)
@@ -240,8 +237,32 @@ func TestListBoundsNameMemory(t *testing.T) {
 		if err := zw.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if files, err := archive.List(archive.TarGz, &buf); err == nil {
-			t.Errorf("List kept %d names of 1 MiB each, want an error", len(files))
+		if files, err := archive.List(archive.TarGz, &buf); !errors.Is(err, archive.ErrNameTooLong) {
+			t.Errorf("List = %d files, %v; want %v", len(files), err, archive.ErrNameTooLong)
+		}
+	})
+	t.Run("total name bytes are capped", func(t *testing.T) {
+		t.Parallel()
+		entries := make([]entry, 10)
+		for i := range entries {
+			entries[i] = entry{name: fmt.Sprintf("dir/file-%d", i), mode: 0o644}
+		}
+		l := archive.DefaultLimits()
+		l.MaxNameBytes = 50 // each name is 11 bytes
+		for kind, data := range map[archive.Kind][]byte{
+			archive.TarGz: tarGz(t, entries),
+			archive.Zip:   zipBytes(t, entries, true),
+		} {
+			if _, err := archive.ListLimits(kind, bytes.NewReader(data), l); !errors.Is(err, archive.ErrNamesTooLarge) {
+				t.Errorf("kind %v: ListLimits = %v, want %v", kind, err, archive.ErrNamesTooLarge)
+			}
+		}
+	})
+	t.Run("zip names over the length cap are rejected", func(t *testing.T) {
+		t.Parallel()
+		data := zipBytes(t, []entry{{name: strings.Repeat("a", 5000), mode: 0o644}}, true)
+		if _, err := archive.List(archive.Zip, bytes.NewReader(data)); !errors.Is(err, archive.ErrNameTooLong) {
+			t.Errorf("List = %v, want %v", err, archive.ErrNameTooLong)
 		}
 	})
 }
