@@ -195,9 +195,11 @@ func commandProblem(v any) string {
 
 // validCommand reports whether c cannot resolve against the working directory: a bare
 // name (looked up on PATH), ~/..., an absolute path or a Windows volume path. The
-// volume form is accepted on every OS so a registry lints the same everywhere.
+// volume form and a rooted path (a leading / or \, the current drive's root on
+// Windows) are accepted on every OS, so a registry lints the same everywhere; none of
+// them resolves against the current directory.
 func validCommand(c string) bool {
-	if !strings.ContainsAny(c, `/\`) || strings.HasPrefix(c, "~/") || filepath.IsAbs(c) {
+	if !strings.ContainsAny(c, `/\`) || strings.HasPrefix(c, "~/") || filepath.IsAbs(c) || c[0] == '/' || c[0] == '\\' {
 		return true
 	}
 	return len(c) >= 3 && isLetter(c[0]) && c[1] == ':' && (c[2] == '/' || c[2] == '\\')
