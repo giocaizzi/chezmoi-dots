@@ -67,7 +67,7 @@ func (d Deps) auditSecrets(ctx context.Context) error {
 	}
 	if ignored := vaultcheck.Ignored(data); len(ignored) > 0 {
 		defer func() {
-			fmt.Fprintf(d.Stdout, "secrets: ignored data.secret entries without a kind: %s (see docs/secrets.md)\n", strings.Join(ignored, ", "))
+			fmt.Fprintf(d.Stdout, "secrets: ignored data.secret entries without a kind: %s (see chezmoi dots help audit)\n", strings.Join(ignored, ", "))
 		}()
 	}
 	if len(results) == 0 {
