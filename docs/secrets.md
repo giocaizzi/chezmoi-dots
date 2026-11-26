@@ -87,7 +87,7 @@ under the table.
 | --- | --- | --- |
 | all | CLI looked up on `PATH` (or `command`) | missing: `fail`, `<name> not found`, hint `install <kind> or set command in .chezmoidata/secrets.toml` |
 | `bws` with `projectFrom` | the answer in this machine's data | empty or absent: `ok`, `not configured (answer <key> is empty)`, nothing else probed; not a string: `fail`, `answer <key> is not a string` |
-| `bws` | access token read from the keyring, then `bws project get <id>` | token missing or empty: `fail`, `no access token in the keyring (service <s>, user <u>)`, hint `chezmoi secret keyring set --service=<s> --user=<u>`. Project readable: `ok`, `project <id> reachable`. Network failure or timeout: `warn`, `unreachable: ...`, hint `check the network and rerun`. Other failure: `fail`, `bws project get failed: <first stderr line>`, hint `check the token and that its machine account can read project <id>` |
+| `bws` | access token read from the keyring, then `bws project get <id>` | item missing or value empty: `fail`, `no access token in the keyring (service <s>, user <u>)`, hint `chezmoi secret keyring set --service=<s> --user=<u>`. Any other keyring failure (chezmoi not found, locked keychain, no Secret Service on headless Linux): `fail`, `keyring read failed: <cause>`, hint `check that chezmoi can read the OS keyring: chezmoi secret keyring get --service=<s> --user=<u>`. Project readable: `ok`, `project <id> reachable`. Network failure or timeout: `warn`, `unreachable: ...`, hint `check the network and rerun`. Other failure: `fail`, `bws project get failed: <first stderr line>`, hint `check the token and that its machine account can read project <id>` |
 | `bw` | `bw status`, only its `status` field | `unlocked`: `ok`, `vault unlocked`. `locked`: `warn`, `vault locked`, hint `bw unlock, then export BW_SESSION`. `unauthenticated`: `fail`, `not logged in`, hint `bw login`. Anything else: `fail`, `bw status failed: ...`. Timeout: `warn`, `unreachable: timed out after <timeout>` |
 | `rbw` | `rbw unlocked` | exit 0: `ok`, `agent unlocked`. Timeout: `warn`. Other error: `warn`, `locked or agent not running`, hint `rbw unlock` |
 
@@ -132,6 +132,7 @@ It works for `bws` entries only: `bw` and `rbw` have no token to inject, so
 - `--timeout <duration>` is a Go duration (`30s`, `2m`); the default `0` means no
   timeout. A negative value is a usage error. On expiry it fails with
   `bws timed out after <duration>`.
+- A missing keyring item (or an empty value) fails with `no access token in the keyring (service <s>, user <u>)` and the `chezmoi secret keyring set` hint. Any other keyring failure (chezmoi not found, locked keychain, no Secret Service on headless Linux) fails with `read the access token (service <s>, user <u>): <cause>`.
 - The CLI's output goes straight to stdout and stderr, and stdin is passed through.
 
 Exit codes: the CLI's own exit code when it fails; 2 for a usage error (no name,
