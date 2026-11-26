@@ -113,7 +113,7 @@ func TestLinterArgv(t *testing.T) {
 // transitively; otherwise lint templates renders it and runs the password manager.
 func TestTemplateFilesSkipsSecretPartials(t *testing.T) {
 	t.Parallel()
-	tests := []struct{ name, body, xfail string }{
+	tests := []struct{ name, body string }{
 		{name: "a template whose partial calls a password manager", body: "{{ template \"creds.tmpl\" . }}\n"},
 		{name: "a template that includeTemplates a secret partial", body: "{{ includeTemplate \"creds.tmpl\" . }}\n"},
 		{name: "a secret partial behind a cycle of partials", body: "{{ template \"loop/a.tmpl\" . }}\n"},
@@ -126,9 +126,6 @@ func TestTemplateFilesSkipsSecretPartials(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.xfail != "" {
-				t.Skip("xfail: " + tt.xfail)
-			}
 			src := t.TempDir()
 			writeTree(t, src, map[string]string{
 				".chezmoitemplates/creds.tmpl":  "{{ bitwarden \"item\" \"id\" }}\n",
