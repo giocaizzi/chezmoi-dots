@@ -34,7 +34,9 @@ var (
 )
 
 // Limits bounds what List reads and keeps from one archive. An archive over a limit
-// is an error: the caller reports it as unchecked.
+// is an error: the caller reports it as unchecked. A zero field means that field's
+// default from DefaultLimits, so Limits{} is DefaultLimits(); a limit cannot be
+// switched off, but math.MaxInt64 is a cap no archive reaches.
 type Limits struct {
 	MaxNameLen   int   // longest entry name, in bytes
 	MaxNameBytes int64 // total bytes of the names kept
@@ -54,6 +56,27 @@ func DefaultLimits() Limits {
 		MaxDecompressed: 4 << 30,
 		MaxZipSpool:     256 << 20, MaxCentralDir: 64 << 20,
 	}
+}
+
+// withDefaults replaces every zero field by its default.
+func (l Limits) withDefaults() Limits {
+	d := DefaultLimits()
+	if l.MaxNameLen == 0 {
+		l.MaxNameLen = d.MaxNameLen
+	}
+	if l.MaxNameBytes == 0 {
+		l.MaxNameBytes = d.MaxNameBytes
+	}
+	if l.MaxDecompressed == 0 {
+		l.MaxDecompressed = d.MaxDecompressed
+	}
+	if l.MaxZipSpool == 0 {
+		l.MaxZipSpool = d.MaxZipSpool
+	}
+	if l.MaxCentralDir == 0 {
+		l.MaxCentralDir = d.MaxCentralDir
+	}
+	return l
 }
 
 // names checks the names of the entries List keeps against the limits.
@@ -119,6 +142,7 @@ func List(kind Kind, r io.Reader) ([]File, error) {
 // ListLimits is List with explicit limits. A zip is spooled to a temporary file of up
 // to MaxZipSpool bytes for the length of the call; callers bound how many run at once.
 func ListLimits(kind Kind, r io.Reader, l Limits) ([]File, error) {
+	l = l.withDefaults()
 	switch kind {
 	case TarGz:
 		return listTarGz(r, l)
@@ -145,7 +169,7 @@ func (c *capReader) Read(p []byte) (int, error) {
 	if c.left < 0 {
 		return 0, ErrTooLarge
 	}
-	if int64(len(p)) > c.left+1 {
+	if int64(len(p))-1 > c.left { // read at most one byte past the cap; c.left+1 could overflow in the other form
 		p = p[:c.left+1]
 	}
 	n, err := c.r.Read(p)

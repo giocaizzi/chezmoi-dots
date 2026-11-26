@@ -452,9 +452,8 @@ func TestListZipUnderstatedEntryCount(t *testing.T) {
 
 func TestListLimitsAtTheTop(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: a MaxDecompressed of math.MaxInt64 does not panic", func(t *testing.T) {
+	t.Run("a MaxDecompressed of math.MaxInt64 does not panic", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: capReader computes c.left+1, which overflows to math.MinInt64 and slices p[:MinInt64]")
 		l := archive.DefaultLimits()
 		l.MaxDecompressed = math.MaxInt64 // no practical cap
 		files, err := archive.ListLimits(archive.TarGz, bytes.NewReader(tarGz(t, []entry{{name: "tool", mode: 0o755}})), l)
@@ -462,6 +461,25 @@ func TestListLimitsAtTheTop(t *testing.T) {
 			t.Errorf("ListLimits = %v, %v; want one file", files, err)
 		}
 	})
+}
+
+func TestListZeroLimitsMeanDefaults(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		kind archive.Kind
+		data []byte
+	}{
+		"tar.gz": {archive.TarGz, tarGz(t, []entry{{name: "d/tool", mode: 0o755}})},
+		"zip":    {archive.Zip, zipBytes(t, []entry{{name: "d/tool", mode: 0o755}}, true)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			files, err := archive.ListLimits(tc.kind, bytes.NewReader(tc.data), archive.Limits{})
+			if err != nil || len(files) != 1 {
+				t.Errorf("ListLimits(Limits{}) = %v, %v; want one file", files, err)
+			}
+		})
+	}
 }
 
 type readerFunc func([]byte) (int, error)
