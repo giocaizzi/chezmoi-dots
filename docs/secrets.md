@@ -210,7 +210,10 @@ reads or wraps secret values and does not replace chezmoi's own functions.
   example secret values from `secret list`, goes to stdout; that is the point
   for templates. It is not a general secret reader and adds no access the token
   does not already grant.
-- Anyone who can edit the registry's `command` can make it hand the token to
-  another program; this is the same trust as the dotfiles source itself.
+- Trust boundary: whoever can edit the registry, in `.chezmoidata/secrets.toml`
+  or by overriding it from the config file's `[data]`, can point `keyring` at
+  any keyring item chezmoi can read and hand it to `command` as
+  `BWS_ACCESS_TOKEN`. When `command` is unset, `PATH` picks the binary. All of
+  this is the same trust as the dotfiles source and the chezmoi config.
 - Every audit CLI call has a 15 second timeout. Being offline gives `warn`
   (`unreachable`), not `fail`.
