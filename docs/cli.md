@@ -495,7 +495,8 @@ The proposal goes to stderr: `version`, `url`, `type`, `path`, `exe`, each targe
 and its value, then `left out: ...` and `ambiguous: ...`. The `path` line says how it
 was settled: `(found in the archives)`, `(not found in the archives)` followed by a
 line `path candidates: <target>: <files>; ...` (what matched, or up to five
-executable files, or `none`), or `(unchecked: <reason>)` when no archive could be
+executable files, or `none`; each file name is quoted with Go escapes, as the
+names come from the archive), or `(unchecked: <reason>)` when no archive could be
 listed. On a terminal it is confirmed with `Add this release? [y/N]`; without one it
 needs `--yes` (otherwise exit 2, and nothing is downloaded). The entry has the keys
 `version`, `url`, `type`, `path`, `exe`, `roles`, `requires`, then the target and

@@ -141,9 +141,9 @@ func TestPkgAddGitHubPathNotFound(t *testing.T) {
 	}
 	for _, w := range []string{
 		`  path = "example-tool"  (not found in the archives)` + "\n",
-		"  path candidates: darwin/arm64: example-tool_1.2.3_darwin_arm64/run; " +
-			"linux/amd64: example-tool_1.2.3_linux_amd64/run, example-tool_1.2.3_linux_amd64/README.md; " +
-			"windows/amd64: example-tool_1.2.3_windows_amd64/run.exe\n",
+		`  path candidates: darwin/arm64: "example-tool_1.2.3_darwin_arm64/run"; ` +
+			`linux/amd64: "example-tool_1.2.3_linux_amd64/run", "example-tool_1.2.3_linux_amd64/README.md"; ` +
+			`windows/amd64: "example-tool_1.2.3_windows_amd64/run.exe"` + "\n",
 	} {
 		if !strings.Contains(e.errw.String(), w) {
 			t.Errorf("stderr lacks %q:\n%s", w, e.errw.String())
@@ -209,10 +209,8 @@ func TestPkgAddGitHubBareBinariesHaveNoPath(t *testing.T) {
 
 func TestPkgAddGitHubCandidatesAreEscaped(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: archive file names reach the terminal raw", func(t *testing.T) {
+	t.Run("archive file names are quoted", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: printProposal joins the candidate names unquoted, so control sequences in an " +
-			"untrusted archive (cursor moves, OSC 52) are written to stderr; the path line is quoted")
 		bodies := ghArchives(t, "run\x1b[1A\x1b[2K")
 		e, gh := ghEnv(t, `{}`, ghValidData("example-tool", bodies))
 		gh.bodies = bodies
