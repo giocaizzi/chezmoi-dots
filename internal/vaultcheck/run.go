@@ -89,7 +89,8 @@ func (x Exec) Run(ctx context.Context, data map[string]any, name string, args []
 		return fmt.Errorf("%s timed out after %s", e.Kind, timeout)
 	}
 	var ec interface{ ExitCode() int }
-	if errors.As(err, &ec) {
+	// A child killed by a signal reports -1: that is no exit code to propagate.
+	if errors.As(err, &ec) && ec.ExitCode() > 0 {
 		return &exitError{code: ec.ExitCode(), msg: redact(err.Error())}
 	}
 	return errors.New(redact(err.Error()))

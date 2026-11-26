@@ -174,6 +174,16 @@ func TestExecRunChildFailure(t *testing.T) {
 			t.Errorf("error = %v, want ExitCode 3", err)
 		}
 	})
+	t.Run("killed by a signal", func(t *testing.T) {
+		t.Parallel()
+		r := newRig("bws")
+		r.runner.err = exitCodedError{-1}
+		err := r.exec.Run(t.Context(), registry("bws", nil), "example-vault", nil, 0)
+		var ec interface{ ExitCode() int }
+		if err == nil || errors.As(err, &ec) {
+			t.Errorf("error = %v, want a plain error without an exit code", err)
+		}
+	})
 	t.Run("token redacted", func(t *testing.T) {
 		t.Parallel()
 		r := newRig("bws")
