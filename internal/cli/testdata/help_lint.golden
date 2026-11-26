@@ -1,0 +1,20 @@
+chezmoi dots lint — Check registries and rendered templates
+
+USAGE
+  chezmoi dots lint [<check>...]
+
+ARGUMENTS
+  check  registry, aliases, packages, secrets, matrix, templates (default: all checks).
+  Checks are arguments, not subcommands; supplied order and repetitions are preserved.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+
+ENVIRONMENT
+  CHEZMOI_EXECUTABLE  chezmoi executable (default: chezmoi).
+  CHEZMOI_CONFIG_FILE  chezmoi config file (default: chezmoi's config).
+  CHEZMOI_SOURCE_DIR  source directory (default: ask chezmoi; honors .chezmoiroot).
+
+EXAMPLES
+  chezmoi dots lint
+  chezmoi dots lint registry templates

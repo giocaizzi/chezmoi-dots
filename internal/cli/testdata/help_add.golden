@@ -1,0 +1,26 @@
+chezmoi dots add — Track a file and register it for editing
+
+USAGE
+  chezmoi dots add <path> [options]
+
+ARGUMENTS
+  path  File to track (a target path; relative paths are from the current directory). With --local, the folder (or the file's folder) to register.
+  A folder needs --local. For an unmanaged file the entry is written to .chezmoidata/edit.toml, then chezmoi add runs, so its git automation commits both; a managed file or a --local folder is only registered, following the same git settings as edit.
+
+OPTIONS
+  -h, --help  Show this help and exit successfully.
+  --desc <description>  entry description (default: prompt on a terminal) (default: "")
+  --encrypt  add an unmanaged file encrypted (chezmoi add --encrypt) (default: "false")
+  --local  register the path's folder as a local entry, without chezmoi add (default: "false")
+  --name <name>  registry entry name (default: inferred from the path) (default: "")
+  --template  add an unmanaged file as a template (chezmoi add --template) (default: "false")
+
+ENVIRONMENT
+  CHEZMOI_EXECUTABLE  chezmoi executable (default: chezmoi).
+  CHEZMOI_CONFIG_FILE  chezmoi config file (default: chezmoi's config).
+  CHEZMOI_SOURCE_DIR  source directory (default: ask chezmoi; honors .chezmoiroot).
+
+EXAMPLES
+  chezmoi dots add ~/.config/example/config.toml --desc "Example settings"
+  chezmoi dots add ~/.ssh/config --encrypt --name ssh
+  chezmoi dots add ~/.config/example --local --desc "Example local files"
