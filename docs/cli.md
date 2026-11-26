@@ -14,7 +14,7 @@ Examples below use `chezmoi dots`; `dots` also works if you define that alias.
 | `status` | none | Show the dotfiles checkout and what `chezmoi apply` would change |
 | `upgrade` | `[<step>...]` | Run system and dotfiles upgrades |
 | `lint` | `[<check>...]` | Validate registries and templates |
-| `audit` | `[<check>...]` | Audit live machine state against the registries |
+| `audit` | `[<check>...]` | Audit live shell aliases and secret-manager configuration against the registries |
 | `pkg` | `status`, `bump`, `add` | Survey and update pinned packages, releases and archive externals, and add packages and releases |
 | `version` | none | Print the binary version |
 | `help` | `[<command> [<subcommand>]]` | Show root or local help |
@@ -185,7 +185,8 @@ chezmoi dots list
 chezmoi dots lint [<check>...]
 ```
 
-Checks are `registry`, `aliases`, `packages`, `matrix`, `templates`. With none,
+Checks are `registry`, `aliases`, `packages`, `secrets`, `matrix`, `templates`
+(`secrets` validates [`.chezmoidata/secrets.toml`](secrets.md#lint)). With none,
 run all in that order; explicit arguments run in the supplied order. Findings
 and check summaries go to stderr. Matrix checks evaluate the OS/role
 configurations; template checks validate rendered files and available linters.
@@ -265,8 +266,9 @@ chezmoi dots upgrade uv npm --dry-run
 chezmoi dots audit [<check>...]
 ```
 
-Like `lint`, checks are arguments. The only check is `aliases`; with no argument
-all checks run, and an unknown check is a usage error (exit 2). The `aliases`
+Like `lint`, checks are arguments. The checks are `aliases` and `secrets`; with no
+argument all checks run in that order, and an unknown check is a usage error
+(exit 2). The `aliases`
 check audits interactive Zsh and Bash aliases against rendered alias files and
 enabled Oh My Zsh plugins. Shells absent from `PATH` are skipped; unmanaged
 aliases make the check fail. Options: only `-h`, `--help`.
@@ -276,9 +278,19 @@ Environment: `XDG_CONFIG_HOME` (default `~/.config`) locates
 read under `~/.oh-my-zsh/plugins`. Apply your dotfiles first so rendered aliases
 exist. Interactive shell startup files affect the aliases observed.
 
+The `secrets` check probes, read-only, the secret-manager CLIs declared in
+`.chezmoidata/secrets.toml` (`bws`, `bw`, `rbw`) and prints a table
+`NAME KIND STATE DETAIL` with a hint line under it for each non-ok entry. States
+are `ok`, `warn` (locked or unreachable) and `fail`; any `fail` exits 1, `warn`
+alone exits 0. No entries declared prints a note and exits 0; an invalid
+registry exits 1 without probing (`chezmoi dots lint secrets`). It never prints
+a secret. Each CLI call times out after 15 seconds. Environment: the `bws` token
+is read with `chezmoi secret keyring get`. See [secrets](secrets.md).
+
 ```sh
 chezmoi dots audit
 chezmoi dots audit aliases
+chezmoi dots audit secrets
 ```
 
 ## pkg status
