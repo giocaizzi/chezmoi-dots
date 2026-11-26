@@ -152,7 +152,7 @@ func (c *capReader) Read(p []byte) (int, error) {
 	if c.left < 0 {
 		return 0, ErrTooLarge
 	}
-	return n, err
+	return n, err //nolint:wrapcheck // io.EOF must reach the tar reader unwrapped
 }
 
 func listTarGz(r io.Reader, l Limits) ([]File, error) {
@@ -207,7 +207,7 @@ func listZip(r io.Reader, l Limits) (files []File, err error) {
 	if size > l.MaxZipSpool {
 		return nil, ErrTooLarge
 	}
-	if err := checkCentralDir(tmp, size, l); err != nil {
+	if err = checkCentralDir(tmp, size, l); err != nil {
 		return nil, err
 	}
 	zr, err := zip.NewReader(tmp, size)
@@ -267,7 +267,7 @@ func checkCentralDir(ra io.ReaderAt, size int64, l Limits) error {
 			return fmt.Errorf("read zip: %w", zip.ErrFormat)
 		}
 		off := binary.LittleEndian.Uint64(tail[loc+8:])
-		if off > uint64(size-zip64EOCDLen) {
+		if off > math.MaxInt64 || int64(off) > size-zip64EOCDLen {
 			return fmt.Errorf("read zip: %w", zip.ErrFormat)
 		}
 		rec := make([]byte, zip64EOCDLen)
@@ -280,7 +280,7 @@ func checkCentralDir(ra io.ReaderAt, size int64, l Limits) error {
 	if entries > MaxEntries {
 		return ErrTooManyEntries
 	}
-	if dirSize > uint64(l.MaxCentralDir) {
+	if dirSize > math.MaxInt64 || int64(dirSize) > l.MaxCentralDir {
 		return ErrTooLarge
 	}
 	return nil
