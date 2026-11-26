@@ -155,7 +155,8 @@ default. `--as` renders one configuration: OS is `darwin`, `linux` or `windows`;
 role is `personal` (default), `work` or `light`. Both `linux,work` and
 `linux/work` are accepted. `--matrix` renders all nine configurations. With no
 selector, `--matrix` shows an overview across registry entries; without it a
-selector is required. `--as` cannot be combined with `--matrix`.
+selector is required. `--as` cannot be combined with `--matrix`. How each
+configuration's data is produced is described in [matrix.md](matrix.md).
 
 Options: `--as` (default empty/current machine), `--matrix` (false), `-h`,
 `--help`. Environment: shared chezmoi and output settings only.
@@ -187,8 +188,9 @@ chezmoi dots lint [<check>...]
 
 Checks are `registry`, `aliases`, `packages`, `matrix`, `templates`. With none,
 run all in that order; explicit arguments run in the supplied order. Findings
-and check summaries go to stderr. Matrix checks evaluate the OS/role
-configurations; template checks validate rendered files and available linters.
+and check summaries go to stderr. The `matrix` check validates the matrix declaration
+(see [matrix.md](matrix.md)); template checks render every configuration and
+validate rendered files with available linters.
 
 Options: only `-h`, `--help`. Environment: shared chezmoi/output settings and
 `PATH` for external validators. Alias validation can use the age identity

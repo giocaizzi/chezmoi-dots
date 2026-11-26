@@ -8,7 +8,7 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 
 - `cmd/chezmoi-dots/` — Main entrypoint (invoked as `dots` or `chezmoi-dots`).
 - `internal/edit/` — Interactive registry-driven dotfiles editor with live pane previews and pre/post save hooks.
-- `internal/matrix/` — 9-matrix OS (Darwin, Linux, Windows) × Role (Personal, Work, Light) evaluator.
+- `internal/matrix/` — 9-matrix OS (Darwin, Linux, Windows) × Role (Personal, Work, Light) evaluator; seeds role answers from the opt-in `matrix` declaration ([docs/matrix.md](docs/matrix.md)).
 - `internal/lint/` — Comprehensive template and registry integrity validator.
 - `internal/pkgreg/` — Package and release registry validator and version comparator.
 - `internal/release/` — Remote release fetcher, commit HEAD lookups and automated checksum bumper (`dots pkg bump`).
