@@ -120,7 +120,7 @@ The managers are `brew`, `cask`, `apt`, `winget`, `uv`, `npm` and `script`, each
 - A release in the `releases` output that has no table in the registry is surveyed without a version or URL.
 - `roles`, `requires`, `type`, `path`, `dest`, `stripComponents`, `exe` and the install keys have no effect unless these templates and your externals and install scripts read them.
 
-`pkg add --github` writes `path` as the repository name (for example `example-tool`) without `{version}` or `{target}`, and `exe = true` when a Windows asset is mapped. Your externals template should append `.exe` to `path` on Windows in that case. A `path` you write by hand can use `{version}` and `{target}` if your template replaces them. See [pkg add](cli.md#pkg-add).
+`pkg add --github` reads `path` from the downloaded archives and may write it with `{version}` and `{target}` placeholders (for example `example-tool_{version}_{target}/example-tool`), or the repository name when the archives do not settle it. It never writes `.exe` in `path`, and writes `exe = true` when a Windows asset is mapped. Your externals template should therefore replace both placeholders in `path` and append `.exe` to it on Windows when `exe` is set, as the example below does. See [pkg add](cli.md#pkg-add).
 
 ## Worked example
 
