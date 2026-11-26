@@ -7,7 +7,7 @@ usable on this machine for this source. The registry never holds secret values.
 
 ## Registry
 
-Each entry is a table under `secret` (chezmoi data key `secret`), named freely:
+Each entry is a table under `secret` (chezmoi data key `secret`), named freely. Only tables with a `kind` key are registry entries; a non-table `secret` value, or tables without `kind`, are ignored, so your own data may share the key. Lint and audit print one note, `secrets: ignored data.secret entries without a kind: <names>`, without failing. If your own data already uses `secret` for something else, rename yours or keep `kind` out of it; a forgotten `kind` on a real entry shows up in that note.
 
 | Key | Kinds | Meaning |
 | --- | --- | --- |
@@ -47,10 +47,9 @@ kind = "rbw"
 `chezmoi dots lint secrets` runs on the isolated (OS/role independent) data,
 like `packages`. Findings are reported as `secret <name>: <message>`:
 
-- `secret` absent: no findings. Present but not a table: `must be a table of entries`.
-- Entry not a table: `must be a table`.
+- `secret` absent or not a table: no findings. Entries that are not tables, or tables without `kind`, are ignored and listed in the note `secrets: ignored data.secret entries without a kind: <names>` (not a failure).
 - Unknown key: `unknown key <k>`; inside `keyring`: `unknown key keyring.<k>`.
-- `kind` missing: `missing kind (one of bws, bw, rbw)`; other value: `unknown kind "<v>" (one of bws, bw, rbw)`.
+- `kind` with an unknown value: `unknown kind "<v>" (one of bws, bw, rbw)`.
 - `command` present but not a non-empty string: `command must be a non-empty string`.
 - `command` a relative path with a separator (`./bws`, `bin/bws`): `command must be an absolute path, ~/..., or a bare name looked up on PATH`. It would resolve against the current directory of whoever runs chezmoi, so `secrets run` and the audit also refuse it (`command <c> is not an absolute path`).
 - `command` starting with `~/` when the home directory is unknown: refused at run/audit time with `cannot expand ~/ in command: home directory unknown`.
