@@ -402,7 +402,7 @@ func quoteAll(v []string) string {
 // configTemplates are chezmoi's config template names; the rendered config keeps
 // the extension of its template.
 func configTemplates() []string {
-	return []string{".chezmoi.toml.tmpl", ".chezmoi.yaml.tmpl", ".chezmoi.json.tmpl", ".chezmoi.jsonc.tmpl"}
+	return []string{".chezmoi.toml.tmpl", ".chezmoi.yaml.tmpl", ".chezmoi.yml.tmpl", ".chezmoi.json.tmpl", ".chezmoi.jsonc.tmpl"}
 }
 
 // Build renders the config template once per OS and profile, writes each result into

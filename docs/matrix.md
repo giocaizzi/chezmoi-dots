@@ -28,8 +28,8 @@ any other profile name (the whole name otherwise), first letter upper-cased:
 
 Each configuration is rendered against its own config file: the source's config
 template rendered for that (OS, profile), never this machine's config. The
-template is `.chezmoi.toml.tmpl`, `.chezmoi.yaml.tmpl`, `.chezmoi.json.tmpl` or
-`.chezmoi.jsonc.tmpl`; more than one is an error, as in chezmoi. It is rendered
+template is `.chezmoi.toml.tmpl`, `.chezmoi.yaml.tmpl`, `.chezmoi.yml.tmpl`,
+`.chezmoi.json.tmpl` or `.chezmoi.jsonc.tmpl`; more than one is an error, as in chezmoi. It is rendered
 with `chezmoi execute-template --init
 --no-tty` against a scratch config whose data holds only the seed answers and
 the profile's answers (profile overrides seed). Only `.chezmoi.os` (and a
