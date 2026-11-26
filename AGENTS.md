@@ -4,15 +4,16 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 
 ## Purpose & Architecture
 
-`chezmoi-dots` extends chezmoi with an interactive, declarative developer toolkit for managing multi-OS, multi-role dotfiles repositories:
+`chezmoi-dots` extends chezmoi with an interactive, declarative developer toolkit for managing multi-OS, multi-profile dotfiles repositories:
 
 - `cmd/chezmoi-dots/` — Main entrypoint (invoked as `dots` or `chezmoi-dots`).
 - `internal/edit/` — Interactive registry-driven dotfiles editor with live pane previews and pre/post save hooks.
-- `internal/matrix/` — 9-matrix OS (Darwin, Linux, Windows) × Role (Personal, Work, Light) evaluator.
+- `internal/matrix/` — OS (Darwin, Linux, Windows) × declared profiles evaluator; seeds profile answers from the opt-in `matrix` declaration ([docs/matrix.md](docs/matrix.md)).
 - `internal/lint/` — Comprehensive template and registry integrity validator.
 - `internal/pkgreg/` — Package and release registry validator and version comparator.
 - `internal/release/` — Remote release fetcher, commit HEAD lookups and automated checksum bumper (`dots pkg bump`).
 - `internal/extpin/` — Commit-pinned archive externals in `.chezmoiexternal` files: scan and in-place bump.
+- `internal/archive/` — Lists the regular files of a `.tar.gz`, `.tgz` or `.zip` stream without extracting it (`pkg add --github` reads the binary path from it).
 - `internal/inventory/` — System package and tool inventory scanner across package managers.
 - `internal/audit/` — Live unmanaged shell alias detector (`dots audit`).
 - `internal/aliasreg/` — Cross-shell alias registry compiler.
@@ -43,6 +44,10 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `make test-help` — Run the focused help regression tests (from `help-tests.mk`).
 - `make test-help-goldens` — Regenerate the help golden files.
 - `make build` — Build cross-platform binaries into `bin/`.
+
+## Docs
+
+The documentation lives in `docs/`; start at [docs/README.md](docs/README.md).
 
 ## Conventional Commits
 

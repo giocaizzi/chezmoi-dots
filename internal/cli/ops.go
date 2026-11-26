@@ -38,6 +38,9 @@ func (d Deps) lint(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Iso replaces the machine config, which may be the only place that names the
+	// source dir, so the clients name it themselves.
+	cz = cz.With("--source", src)
 	scratch, err := os.MkdirTemp("", "dots-lint-")
 	if err != nil {
 		return fmt.Errorf("make scratch dir: %w", err)

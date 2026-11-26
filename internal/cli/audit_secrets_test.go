@@ -41,11 +41,11 @@ type secretRunner struct {
 	rbw   error  // result of `rbw unlocked`
 }
 
-func (r *secretRunner) Run(ctx context.Context, c chez.Cmd) error {
+func (r *secretRunner) Run(_ context.Context, c chez.Cmd) error {
 	base := filepath.Base(c.Args[0])
 	isKeyring := slices.Contains(c.Args, "keyring") && slices.Contains(c.Args, "get") && slices.Contains(c.Args, "secret")
 	if !isKeyring && base != "bws" && base != "bw" && base != "rbw" {
-		return chez.ExecRunner{}.Run(ctx, c)
+		return errNotScripted
 	}
 	r.mu.Lock()
 	r.calls = append(r.calls, slices.Clone(c.Args))
@@ -97,11 +97,24 @@ func (e *env) runWith(t *testing.T, runner chez.Runner, args ...string) (stdout,
 	d := cli.Deps{
 		Getenv: func(k string) string { return e.vars[k] },
 		Stdin:  strings.NewReader(""), Stdout: &out, Stderr: &errw,
-		Runner: runner, LookPath: fakeLookPath,
+		Runner: scriptedRunner{script: runner, real: sandboxRunner{sandboxEnv(e.sandbox)}}, LookPath: fakeLookPath,
 		GOOS: runtime.GOOS, Home: e.vars["HOME"], Version: "test",
 	}
 	err = cli.Run(t.Context(), d, args)
 	return out.String(), errw.String(), err
+}
+
+// errNotScripted is what a scripted runner returns for a command it does not script.
+var errNotScripted = errors.New("not scripted")
+
+// scriptedRunner asks script first and runs what it does not script, chezmoi, in the sandbox.
+type scriptedRunner struct{ script, real chez.Runner }
+
+func (r scriptedRunner) Run(ctx context.Context, c chez.Cmd) error {
+	if err := r.script.Run(ctx, c); !errors.Is(err, errNotScripted) {
+		return err
+	}
+	return r.real.Run(ctx, c)
 }
 
 // secretsEnv is a sandbox whose source declares the registry and whose config answers secretsProjectId.

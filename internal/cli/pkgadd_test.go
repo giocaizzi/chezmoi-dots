@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -243,6 +244,28 @@ func TestPkgAddFlagForms(t *testing.T) {
 	}
 }
 
+func TestPkgAddRoles(t *testing.T) {
+	t.Parallel()
+	t.Run("empty role name", func(t *testing.T) {
+		t.Parallel()
+		e := newPkgAddEnv(t, pkgAddOldText, `{}`)
+		err := e.run(t, "wget", "--brew", "--roles", "home,")
+		if !errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), "non-empty names") {
+			t.Fatalf("pkg add = %v, want a usage error about the empty name", err)
+		}
+		if got := e.text(t); got != pkgAddOldText {
+			t.Errorf("a rejected command changed packages.toml:\n%s", got)
+		}
+	})
+	t.Run("any name", func(t *testing.T) {
+		t.Parallel()
+		e := newPkgAddEnv(t, pkgAddOldText, `{}`)
+		if err := e.run(t, "wget", "--brew", "--roles", "admin"); err != nil {
+			t.Fatalf("pkg add = %v, want it to pass", err)
+		}
+	})
+}
+
 func TestPkgAddUsageErrors(t *testing.T) {
 	t.Parallel()
 	const url = "https://example.com/{version}/tool-{target}.tar.gz"
@@ -254,7 +277,6 @@ func TestPkgAddUsageErrors(t *testing.T) {
 		{"two names", []string{"a", "b", "--brew"}},
 		{"bad name", []string{"a b", "--brew"}},
 		{"name with a dot", []string{"a.b", "--brew"}},
-		{"bad role", []string{"wget", "--brew", "--roles", "personal,admin"}},
 		{"empty role", []string{"wget", "--brew", "--roles", ""}},
 		{"empty requires", []string{"wget", "--brew", "--requires", ""}},
 		{"empty brew value", []string{"wget", "--brew="}},
@@ -754,6 +776,7 @@ type ghTransport struct {
 	api       []string
 	downloads []string
 	json      string
+	bodies    map[string][]byte // asset name -> body; other downloads get archiveBytes
 }
 
 func (g *ghTransport) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -765,6 +788,9 @@ func (g *ghTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		body = []byte(g.json)
 	} else {
 		g.downloads = append(g.downloads, r.URL.String())
+		if b, ok := g.bodies[path.Base(r.URL.Path)]; ok {
+			body = b
+		}
 	}
 	return &http.Response{
 		StatusCode: http.StatusOK, Status: "200 OK", Body: io.NopCloser(bytes.NewReader(body)),
@@ -786,10 +812,10 @@ func ghReleaseJSON() string {
 	return `{"tag_name":"v1.2.3","assets":[` + strings.Join(assets, ",") + `]}`
 }
 
-func ghEnv(t *testing.T, text string, datas ...string) (*pkgAddEnv, *ghTransport) {
+func ghEnv(t *testing.T, datas ...string) (*pkgAddEnv, *ghTransport) {
 	t.Helper()
 	gh := &ghTransport{json: ghReleaseJSON()}
-	e := newPkgAddEnv(t, text, datas...)
+	e := newPkgAddEnv(t, pkgAddOldText, datas...)
 	e.http = gh
 	return e, gh
 }
@@ -813,7 +839,7 @@ func TestPkgAddGitHub(t *testing.T) { //nolint:gocognit // table test with many 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			e, gh := ghEnv(t, pkgAddOldText, `{}`, valid)
+			e, gh := ghEnv(t, `{}`, valid)
 			e.stdin, e.tty = tt.stdin, tt.tty
 			if err := e.run(t, append([]string{"example-tool", "--github", "octocat/example-tool", "--roles", "work"}, tt.args...)...); err != nil {
 				t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
@@ -849,7 +875,7 @@ func TestPkgAddGitHub(t *testing.T) { //nolint:gocognit // table test with many 
 
 func TestPkgAddGitHubDryRunDownloadsNothing(t *testing.T) {
 	t.Parallel()
-	e, gh := ghEnv(t, pkgAddOldText, `{}`)
+	e, gh := ghEnv(t, `{}`)
 	if err := e.run(t, "example-tool", "--github", "octocat/example-tool", "--yes", "--dry-run"); err != nil {
 		t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
 	}
@@ -873,23 +899,24 @@ func TestPkgAddGitHubNeedsConfirmation(t *testing.T) {
 		tty         bool
 		args        []string
 		usage       bool
+		downloads   int // the archives are read before the question is asked
 	}{
-		{"no tty without --yes", "", false, nil, true},
-		{"dry run no tty without --yes", "", false, []string{"--dry-run"}, true},
-		{"tty declines", "n\n", true, nil, false},
-		{"tty empty answer declines", "\n", true, nil, false},
+		{"no tty without --yes", "", false, nil, true, 0},
+		{"dry run no tty without --yes", "", false, []string{"--dry-run"}, true, 0},
+		{"tty declines", "n\n", true, nil, false, 3},
+		{"tty empty answer declines", "\n", true, nil, false, 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			e, gh := ghEnv(t, pkgAddOldText, `{}`)
+			e, gh := ghEnv(t, `{}`)
 			e.stdin, e.tty = tt.stdin, tt.tty
 			err := e.run(t, append([]string{"example-tool", "--github", "octocat/example-tool"}, tt.args...)...)
 			if err == nil || errors.Is(err, cli.ErrUsage) != tt.usage {
 				t.Fatalf("pkg add = %v, want usage error %v", err, tt.usage)
 			}
-			if len(gh.downloads) != 0 {
-				t.Errorf("downloads = %v", gh.downloads)
+			if len(gh.downloads) != tt.downloads {
+				t.Errorf("downloads = %v, want %d", gh.downloads, tt.downloads)
 			}
 			if got := e.text(t); got != pkgAddOldText {
 				t.Errorf("packages.toml changed:\n%s", got)

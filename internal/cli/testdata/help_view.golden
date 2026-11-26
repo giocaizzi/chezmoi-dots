@@ -5,11 +5,11 @@ USAGE
 
 ARGUMENTS
   what  Registry entry, source path or target path. Required unless --matrix requests an overview.
-  Default: render the current configuration; --matrix renders all nine OS/role configurations.
+  Default: render the current configuration; --matrix renders every OS/profile configuration.
 
 OPTIONS
   -h, --help  Show this help and exit successfully.
-  --as <os[,role]>  render one os[,role] (darwin|linux|windows; personal|work|light) (default: "")
+  --as <os[,profile]>  render one os[,profile] (darwin|linux|windows; a declared profile) (default: "")
   --matrix  render every configuration (default: "false")
 
 ENVIRONMENT
@@ -19,5 +19,5 @@ ENVIRONMENT
 
 EXAMPLES
   chezmoi dots view shell
-  chezmoi dots view shell --as linux,work
+  chezmoi dots view shell --as linux,home
   chezmoi dots view --matrix

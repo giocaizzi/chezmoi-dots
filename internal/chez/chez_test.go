@@ -87,12 +87,16 @@ func TestWithDoesNotAliasGlobals(t *testing.T) {
 func TestManaged(t *testing.T) {
 	t.Parallel()
 	r := &fakeRunner{stdout: `{"/h/.zshrc":{"sourceRelative":"dot_zshrc"}}`}
-	got, err := New(r, "chezmoi").Managed(t.Context(), nil)
+	got, err := New(r, "chezmoi", "--config", "/real").Managed(t.Context(), "/per-config.yaml", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if diff := cmp.Diff(map[string]string{"/h/.zshrc": "dot_zshrc"}, got); diff != "" {
 		t.Errorf("Managed() (-want +got):\n%s", diff)
+	}
+	// The per-configuration file comes last, so it wins over the client's own.
+	if a := r.calls[0]; len(a) < 5 || a[1] != "--config" || a[2] != "/real" || a[3] != "--config" || a[4] != "/per-config.yaml" {
+		t.Errorf("argv = %v, want the client's --config then /per-config.yaml", a)
 	}
 }
 

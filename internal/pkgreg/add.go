@@ -8,9 +8,6 @@ import (
 	"strings"
 )
 
-// ValidRole reports whether r is a role a package or release can be limited to.
-func ValidRole(r string) bool { return slices.Contains(roles(), r) }
-
 // ValidPlatform reports whether p is an <os>/<arch> release target.
 func ValidPlatform(p string) bool { return platform.MatchString(p) }
 
@@ -67,7 +64,7 @@ func (e PackageEntry) Text() string {
 // ReleaseEntry is a new [release.<name>] table with its target and sha256 tables.
 type ReleaseEntry struct {
 	Name, Version, URL string
-	Type, Path         string            // optional: "file" or "archive-file", and the binary inside the archive
+	Type, Path         string            // optional: "file" or "archive-file", and the binary inside the archive (may hold {version} and {target})
 	Exe                bool              // a windows target is mapped
 	Targets            map[string]string // "<os>/<arch>" to the release's name for it
 	Sums               map[string]string // "<os>/<arch>" to the sha256; nil leaves the table out

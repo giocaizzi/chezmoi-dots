@@ -28,7 +28,7 @@ type cliRunner struct {
 	err    error
 }
 
-func (r *cliRunner) Run(ctx context.Context, c chez.Cmd) error {
+func (r *cliRunner) Run(_ context.Context, c chez.Cmd) error {
 	base := filepath.Base(c.Args[0])
 	isKeyring := slices.Contains(c.Args, "keyring") && slices.Contains(c.Args, "get") && slices.Contains(c.Args, "secret")
 	switch {
@@ -43,7 +43,7 @@ func (r *cliRunner) Run(ctx context.Context, c chez.Cmd) error {
 		_, _ = c.Stdout.Write([]byte(r.stdout))
 		return r.err
 	}
-	return chez.ExecRunner{}.Run(ctx, c)
+	return errNotScripted
 }
 
 func TestSecretsRun(t *testing.T) {

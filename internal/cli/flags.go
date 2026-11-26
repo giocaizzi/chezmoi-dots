@@ -18,7 +18,7 @@ func newFlags(name string) *flag.FlagSet {
 		fs.Bool("fetch", false, "git fetch the dotfiles first")
 		fs.Bool("check", false, "exit non-zero when the dotfiles are not in sync")
 	case cmdView:
-		fs.String("as", "", "render one `os[,role]` (darwin|linux|windows; personal|work|light)")
+		fs.String("as", "", "render one `os[,profile]` (darwin|linux|windows; a declared profile)")
 		fs.Bool("matrix", false, "render every configuration")
 	case cmdPkgState:
 		fs.Bool("offline", false, "skip upstream lookups (releases, uv, npm) and the git fetch")
@@ -33,7 +33,7 @@ func newFlags(name string) *flag.FlagSet {
 		fs.String("winget", "", "install with winget `id`")
 		fs.Var(&optValue{}, "uv", "install with uv tool; --uv=<spec> when the spec differs from the name")
 		fs.Var(&optValue{}, "npm", "install with npm; --npm=<spec> when the spec differs from the name")
-		fs.String("roles", "", "limit to `roles` (comma list of personal, work, light)")
+		fs.String("roles", "", "limit to `roles` (comma list of role names your templates define)")
 		fs.String("requires", "", "install only when this [data] `answer` is set")
 		fs.Bool("release", false, "add a pinned release binary instead of a package")
 		fs.String("version", "", "release `version` to pin")

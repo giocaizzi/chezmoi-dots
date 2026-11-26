@@ -148,22 +148,25 @@ chezmoi dots add ~/projects/notes --local --desc "Notes folder"
 ## view
 
 ```text
-chezmoi dots view [--as <os>[,<role>]] [--matrix] [<what>]
+chezmoi dots view [--as <os>[,<profile>]] [--matrix] [<what>]
 ```
 
 With one selector, show composition and the rendered target for this machine by
 default. `--as` renders one configuration: OS is `darwin`, `linux` or `windows`;
-role is `personal` (default), `work` or `light`. Both `linux,work` and
-`linux/work` are accepted. `--matrix` renders all nine configurations. With no
+profile is a profile declared in the matrix. Both `linux,home` and `linux/home`
+are accepted. The profile may be omitted only when exactly one profile exists;
+otherwise it is an error listing the profiles. `--matrix` renders every
+OS/profile configuration (3 x the number of profiles). With no
 selector, `--matrix` shows an overview across registry entries; without it a
-selector is required. `--as` cannot be combined with `--matrix`.
+selector is required. `--as` cannot be combined with `--matrix`. How each
+configuration's data is produced is described in [matrix.md](matrix.md).
 
 Options: `--as` (default empty/current machine), `--matrix` (false), `-h`,
 `--help`. Environment: shared chezmoi and output settings only.
 
 ```sh
 chezmoi dots view git
-chezmoi dots view git --as linux,work
+chezmoi dots view git --as linux,home
 chezmoi dots view --matrix
 ```
 
@@ -186,15 +189,17 @@ chezmoi dots list
 chezmoi dots lint [<check>...]
 ```
 
-Checks are `registry`, `aliases`, `packages`, `secrets`, `matrix`, `templates`
-(`secrets` validates [`.chezmoidata/secrets.toml`](secrets.md#lint)). With none,
+Checks are `registry`, `aliases`, `packages` (the rules are in the
+[package registry](registry.md)), `secrets` (validates
+[`.chezmoidata/secrets.toml`](secrets.md#lint)), `matrix`, `templates`. With none,
 run all in that order; explicit arguments run in the supplied order. Findings
-and check summaries go to stderr. Matrix checks evaluate the OS/role
-configurations; template checks validate rendered files and available linters.
+and check summaries go to stderr. The `matrix` check validates the matrix declaration
+(see [matrix.md](matrix.md)); `templates` renders every shell, zsh,
+PowerShell and JSON template for every configuration and lints the result with
+the available linters (details in [matrix.md](matrix.md#template-linting)).
 
 Options: only `-h`, `--help`. Environment: shared chezmoi/output settings and
-`PATH` for external validators. Alias validation can use the age identity
-configured in chezmoi when available.
+`PATH` for external validators.
 
 ```sh
 chezmoi dots lint
@@ -301,7 +306,9 @@ chezmoi dots pkg status [--offline] [--fetch] [--check]
 ```
 
 Survey tools on this machine, comparing installed versions, pins and upstream
-releases. No positional arguments. All options default to false:
+releases. The tools come from the [package registry](registry.md) through your
+dotfiles' `role`, `releases` and `packages` templates (see
+[what your dotfiles provide](registry.md#what-your-dotfiles-provide)). No positional arguments. All options default to false:
 
 - `--offline`: skip upstream release and archive HEAD lookups, `uv` and `npm` latest lookups and
   the Git fetch. For pinned npm packages (including the `npm view` lookup) the
@@ -356,7 +363,8 @@ chezmoi dots pkg status --fetch --check
 chezmoi dots pkg bump [--dry-run] [<pin>...]
 ```
 
-`<pin>` is a release name from `.chezmoidata/packages.toml` or an archive
+`<pin>` is a release name from `.chezmoidata/packages.toml` (see the
+[release table](registry.md#releases)) or an archive
 repository path (`octocat/example`); with no names, everything. Fetch newer
 upstream versions and checksums, then update the pins. It edits
 `.chezmoidata/packages.toml` and/or the externals files and never installs
@@ -478,22 +486,57 @@ rate limit; neither is required. The assets are read by name only:
 - Per os/arch archives (`.tar.gz`, `.tgz`, `.tar.xz`, `.zip`) win over bare binaries,
   `.tar.gz` wins over `.zip` on darwin and linux and `.zip` over `.tar.gz` on
   windows. Two equal candidates are reported as ambiguous and both are left out.
-- The chosen assets must be all archives (`type = "archive-file"`, with `path` the
-  repository name) or all bare binaries (`type = "file"`); a mix is an error. `exe =
-  true` is written when a windows target is mapped.
+- The chosen assets must be all archives (`type = "archive-file"`) or all bare
+  binaries (`type = "file"`); a mix is an error. `exe = true` is written when a
+  windows target is mapped.
 - The release version (the tag without a leading `v`) becomes `{version}` in the URL;
   the part of the names that differs per platform becomes `{target}` and each
   target's value.
 
-The proposal goes to stderr: `version`, `url`, `type`, `path`, `exe`, each target
-and its value, then `left out: ...` and `ambiguous: ...`. On a terminal it is
-confirmed with `Add this release? [y/N]`; without one it needs `--yes` (otherwise
-exit 2). The entry has the keys `version`, `url`, `type`, `path`, `exe`, `roles`,
-`requires`, then the target and sha256 tables; the checksums are computed as in
-release mode, so it downloads every target's archive.
+For `type = "archive-file"` the `path` is read from the archives. Before the proposal
+is printed (and so before the confirmation), every target's archive is downloaded
+once, for the checksum and, when it is a `.tar.gz`, `.tgz` or `.zip`, for the list of
+its regular files; nothing is extracted to disk (a zip is spooled to a temporary file
+that is removed). The same size cap and timeout as in release mode apply, and a
+download that fails stops the command with nothing written. A target's candidates
+are its executable files whose name is the entry name or the repository name (on
+windows `<name>.exe`, any case); a file in an archive that records no modes counts
+as executable. When every listed target has exactly one candidate and they are the
+same path once the version and the target's full value are replaced by `{version}` and
+`{target}` where they are whole tokens, that is the `path` (for example
+`tool_{version}/bin/tool`; never with `.exe`). `{target}` always stands for the whole
+registry value, archive extension included: with extension-carrying values
+(`linux_amd64.tar.gz`) a directory like `tool_1.2.3_linux_amd64` is not settled and is
+reported as not found. When some target could not be listed (a `.tar.xz`, say), a path
+that still names an OS or an arch (`linux`, `amd64`, `x86_64`, ...) once templated is
+not proposed, since it could be wrong for that target; when every target is listed
+and they all agree on the path, it is proposed as is (`toolchain-{version}/bin/arm-none-eabi-gcc`). Otherwise the `path` stays the repository name. A `.tar.xz` archive is not listed, and targets with one are left out
+of the check; an archive that cannot be read counts the same.
 
-`--roles` takes a comma list of `personal`, `work`, `light` and writes
-`roles = [...]`; `--requires <answer>` writes `requires = "<answer>"`. Both work
+Listing is bounded against hostile archives: entry names over 4096 bytes or more
+than 16 MiB of names in total, more than 100000 entries, or more than 4 GiB of
+decompressed `.tar.gz` data stop the listing. A `.zip` is spooled only up to 256 MiB,
+one zip at a time per run (the wait for the slot is not part of a download's timeout), and is not listed when its central
+directory holds more than 100000 entries or is over 64 MiB, counted from the headers the
+reader would actually read (not from the sizes the archive declares). An archive that hits a limit counts as unchecked; its
+checksum still covers the whole download. Zip entry names are kept as stored
+(backslashes stay backslashes), as chezmoi matches them when it applies the external.
+
+The proposal goes to stderr: `version`, `url`, `type`, `path`, `exe`, each target
+and its value, then `left out: ...` and `ambiguous: ...`. The `path` line says how it
+was settled: `(found in the archives)`, `(not found in the archives)` followed by a
+line `path candidates: <target>: <files>; ...` (what matched, or up to five
+executable files, or `none`; each file name is quoted with Go escapes, as the
+names come from the archive), or `(unchecked: <reason>)` when no archive could be
+listed. On a terminal it is confirmed with `Add this release? [y/N]`; without one it
+needs `--yes` (otherwise exit 2, and nothing is downloaded). The entry has the keys
+`version`, `url`, `type`, `path`, `exe`, `roles`, `requires`, then the target and
+sha256 tables; the checksums come from the same downloads, so the archives are not
+fetched twice. Bare binaries (`type = "file"`) have no `path` and are downloaded for
+the checksum only after the confirmation, as in release mode.
+
+`--roles` takes a comma list of non-empty role names, free-form names your
+templates define, and writes `roles = [...]`; `--requires <answer>` writes `requires = "<answer>"`. Both work
 in every mode. Package source flags with `--release`, release flags
 (`--version`, `--url`, `--target`) without it, a missing version, url or target in
 release mode, a bad name, role, target or url, and a name other than exactly one are
@@ -501,9 +544,10 @@ usage errors (exit 2).
 
 `--dry-run` (false) prints the entry to stdout and changes nothing; for an existing
 package it prints the key lines it would add. In release and GitHub mode it downloads
-no archive and ends the entry with the comment `# sha256 computed when written`
-where the checksums go (`--github` still reads the GitHub API). It makes no git
-changes.
+no archive, ends the entry with the comment `# sha256 computed when written`
+where the checksums go and leaves `path` as the repository name, marked
+`(unchecked: --dry-run downloads no archive)` (`--github` still reads the GitHub
+API). It makes no git changes.
 
 After the write, the whole package registry is validated as in
 `lint packages`. Findings are printed to stderr (`✗ packages`, the findings, and
@@ -522,7 +566,7 @@ Environment: shared chezmoi and output settings; `GH_TOKEN` / `GITHUB_TOKEN` for
 chezmoi dots pkg add wget --brew --apt
 chezmoi dots pkg add wget            # ask this machine's package managers
 chezmoi dots pkg add wget --yes      # accept what they find, no prompt
-chezmoi dots pkg add example-app --cask example-app --roles personal,work
+chezmoi dots pkg add example-app --cask example-app --roles home
 chezmoi dots pkg add example-tool --release --version 1.2.3 \
   --url 'https://example.com/{version}/tool-{target}.tar.gz' \
   --target linux/amd64=linux-x86_64 --target darwin/arm64=macos-arm --dry-run

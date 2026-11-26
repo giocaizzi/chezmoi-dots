@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -17,26 +18,19 @@ import (
 // These tests drive the real command line against a real chezmoi and a small fixture
 // source; they skip when chezmoi is not installed.
 
-const configTemplate = `{{- $roles := dict -}}
-{{- range list "light" "work" }}
-{{- if kindIs "bool" (get $ .) }}{{ $_ := set $roles . (ternary "yes" "no" (get $ .)) }}{{ end }}
-{{- end }}
-{{- $light := eq (promptChoiceOnce $roles "light" "Light?" (list "yes" "no") (get $roles "light" | default "no")) "yes" -}}
-{{- $work := eq (promptChoiceOnce $roles "work" "Work?" (list "yes" "no") (get $roles "work" | default "no")) "yes" -}}
-{{- $user := promptStringOnce . "gitUser" "Name" "" -}}
-{{- $harnesses := list -}}
-{{- if not $light }}
-{{- $all := list "claude" "vscode" -}}
-{{- $harnesses = promptMultichoiceOnce . "harnesses" "Harnesses" $all (get . "harnesses" | default list) -}}
-{{- end }}
+const configTemplate = `{{- $user := promptStringOnce . "gitUser" "Name" "" -}}
+{{- $tools := promptMultichoiceOnce . "tools" "Tools" (list "alpha" "beta") (get . "tools" | default list) -}}
+{{- $featureX := promptBoolOnce . "featureX" "Feature X?" false -}}
 [data]
     gitUser = {{ $user | quote }}
-    light = {{ $light }}
-    work = {{ $work }}
-{{- if not $light }}
-    harnesses = {{ $harnesses | toJson }}
+    featureX = {{ $featureX }}
+    tools = {{ $tools | toJson }}
+{{- if eq .chezmoi.os "windows" }}
+    winOnly = true
 {{- end }}
 `
+
+const matrixDeclaration = "[matrix.profile.home]\nfeatureX = true\n[matrix.profile.minimal]\n"
 
 const registry = `[edit.note]
 desc = "A note"
@@ -51,16 +45,46 @@ source = ".chezmoidata/edit.toml"
 
 type env struct {
 	src, dest string
+	sandbox   string // HOME and XDG_* of the chezmoi subprocesses
 	vars      map[string]string
+}
+
+// sandboxEnv lists the variables that point home and the XDG dirs of a subprocess at
+// dir, so a chezmoi it starts never reads or writes the developer's own.
+func sandboxEnv(dir string) []string {
+	out := make([]string, 0, 6)
+	out = append(out, "HOME="+dir, "USERPROFILE="+dir)
+	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
+		out = append(out, k+"="+filepath.Join(dir, k))
+	}
+	return out
+}
+
+// gitEnv is the sandbox environment for test git commands: with HOME and XDG_* in
+// scratch and no system config, no global config, hooks or core.hooksPath of the
+// developer apply.
+func gitEnv(dir string) []string {
+	return append(sandboxEnv(dir), "GIT_CONFIG_NOSYSTEM=1")
+}
+
+// sandboxRunner runs commands as processes with the sandbox environment.
+type sandboxRunner struct{ env []string }
+
+func (r sandboxRunner) Run(ctx context.Context, c chez.Cmd) error {
+	c.Env = append(append([]string(nil), r.env...), c.Env...)
+	return chez.ExecRunner{}.Run(ctx, c)
 }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	if _, err := exec.LookPath("chezmoi"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("chezmoi is not on PATH: CI installs it so these tests never skip there")
+		}
 		t.Skip("chezmoi is not installed")
 	}
 	root := t.TempDir()
-	e := &env{src: filepath.Join(root, "src"), dest: filepath.Join(root, "dest")}
+	e := &env{src: filepath.Join(root, "src"), dest: filepath.Join(root, "dest"), sandbox: filepath.Join(root, "sandbox")}
 	write := func(path, text string) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			t.Fatal(err)
@@ -69,11 +93,13 @@ func newEnv(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
-	write(filepath.Join(e.src, ".chezmoi.toml.tmpl"), configTemplate)
+	// The config template names the destination: a per-configuration config replaces the
+	// machine config, as chezmoi init would store the template's output.
+	write(filepath.Join(e.src, ".chezmoi.toml.tmpl"), "destDir = "+quote(e.dest)+"\n{{ \"\" }}"+configTemplate)
 	write(filepath.Join(e.src, ".chezmoidata", "edit.toml"), registry)
-	write(filepath.Join(e.src, "dot_note.tmpl"), "hello {{ if get . \"work\" }}work{{ else }}home{{ end }}\n")
+	write(filepath.Join(e.src, "dot_note.tmpl"), "hello {{ if get . \"featureX\" }}feature{{ else }}home{{ end }}\n")
 	cfg := filepath.Join(root, "chezmoi.toml")
-	write(cfg, "destDir = "+quote(e.dest)+"\npersistentState = "+quote(filepath.Join(root, "state.boltdb"))+"\n[data]\n    work = false\n    light = false\n    harnesses = []\n")
+	write(cfg, "destDir = "+quote(e.dest)+"\npersistentState = "+quote(filepath.Join(root, "state.boltdb"))+"\n[data]\n    featureX = false\n    tools = []\n")
 	if err := os.MkdirAll(e.dest, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +131,7 @@ func (e *env) run(t *testing.T, stdin string, args ...string) (stdout, stderr st
 	d := cli.Deps{
 		Getenv: func(k string) string { return e.vars[k] },
 		Stdin:  pr, Stdout: &out, Stderr: &errw,
-		Runner: chez.ExecRunner{}, LookPath: exec.LookPath,
+		Runner: sandboxRunner{sandboxEnv(e.sandbox)}, LookPath: exec.LookPath,
 		GOOS: runtime.GOOS, Home: e.vars["HOME"], Version: "test",
 	}
 	err = cli.Run(t.Context(), d, args)
@@ -152,9 +178,13 @@ func TestListShowsTheRegistry(t *testing.T) {
 func TestViewRendersAConfiguration(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,work")
-	if err != nil || !strings.Contains(out, "hello work") {
-		t.Errorf("view --as linux,work = %q, %v, want the work render", out, err)
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,home")
+	if err != nil || !strings.Contains(out, "hello feature") {
+		t.Errorf("view --as linux,home = %q, %v, want the home render", out, err)
+	}
+	if out, _, err = e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,minimal"); err != nil || !strings.Contains(out, "hello home") {
+		t.Errorf("view --as linux,minimal = %q, %v, want the minimal render", out, err)
 	}
 }
 
@@ -192,7 +222,7 @@ func TestEditAppliesWhenConfirmed(t *testing.T) {
 	if !strings.HasSuffix(string(src), "more") {
 		t.Errorf("source = %q, want the edit", src)
 	}
-	for _, want := range []string{"linux/work", "reload the note"} {
+	for _, want := range []string{"linux/default", "reload the note"} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want it to mention %q", stderr, want)
 		}
@@ -261,7 +291,7 @@ func configureEditAutomation(t *testing.T, path string) {
 
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := chez.Cmd{Dir: dir, Args: append([]string{"git"}, args...)}
+	cmd := chez.Cmd{Dir: dir, Args: append([]string{"git"}, args...), Env: gitEnv(t.TempDir())}
 	out, err := chez.Output(t.Context(), chez.ExecRunner{}, cmd)
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
@@ -305,16 +335,319 @@ func TestLintRegistryOnTheFixture(t *testing.T) {
 	}
 }
 
-// A config template that offers no `$all := list` harness list is a repo without
-// harness choices: the matrix still builds and the templates lint runs.
-func TestLintTemplatesWithoutAHarnessList(t *testing.T) {
+// The matrix declaration is optional: without one the matrix builds from the defaults.
+func TestLintWithoutAMatrixDeclaration(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	tmpl := strings.Replace(configTemplate, `{{- $all := list "claude" "vscode" -}}`, `{{- $all := list -}}`, 1)
-	if err := os.WriteFile(filepath.Join(e.src, ".chezmoi.toml.tmpl"), []byte(tmpl), 0o644); err != nil {
+	if _, stderr, err := e.run(t, "", "lint", "matrix", "templates"); err != nil {
+		t.Errorf("lint matrix templates = %v\n%s", err, stderr)
+	}
+}
+
+func (e *env) writeFile(t *testing.T, rel, text string) {
+	t.Helper()
+	path := filepath.Join(e.src, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, stderr, err := e.run(t, "", "lint", "templates"); err != nil {
-		t.Errorf("lint templates = %v\n%s", err, stderr)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
 	}
+}
+
+func TestLintMatrixInvalidDeclaration(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", "[matrix.profile.Boss]\nfeatureX = true\n")
+	_, stderr, err := e.run(t, "", "lint", "matrix")
+	if err == nil || !strings.Contains(stderr, "matrix.profile.Boss") || !strings.Contains(stderr, "invalid profile name") {
+		t.Errorf("lint matrix = %v, stderr %q, want a finding naming the invalid profile", err, stderr)
+	}
+}
+
+// A profile answer is seeded into the config template, so a script gated on it breaks
+// only for that profile.
+func TestLintTemplatesSeedsProfileAnswers(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	e.writeFile(t, "dot_probe.json.tmpl", "{{ if .featureX }}{ broken{{ end }}")
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "(darwin/home)") || strings.Contains(stderr, "/minimal)") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the home profile only", err, stderr)
+	}
+}
+
+// The config template sees the OS it is rendered for, so an answer it derives from the
+// OS reaches only that OS's configurations.
+func TestLintTemplatesRendersConfigPerOS(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, "dot_probe.json.tmpl", "{{ if get . \"winOnly\" }}{ broken{{ end }}")
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "(windows/default)") || strings.Contains(stderr, "(darwin/") || strings.Contains(stderr, "(linux/") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the windows configuration only", err, stderr)
+	}
+}
+
+func TestLintTemplatesVariant(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration+"[[matrix.variant]]\nname = \"one tool\"\nprofiles = [\"home\"]\nset = { tools = [\"alpha\"] }\n")
+	e.writeFile(t, "dot_probe.json.tmpl", `{{ if has "alpha" (get . "tools" | default list) }}{ broken{{ end }}`)
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "(darwin/home [one tool])") || strings.Contains(stderr, "/minimal") || strings.Contains(stderr, "(darwin/home)") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the home variant only", err, stderr)
+	}
+}
+
+// A template .chezmoiignore leaves out of a configuration is not rendered there, so
+// an answer declared empty keeps gated templates (secrets, network) out of the lint.
+func TestLintTemplatesHonoursChezmoiignore(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	e.writeFile(t, ".chezmoiignore", "{{ if not .featureX }}.probe.json\n{{ end }}")
+	e.writeFile(t, "dot_probe.json.tmpl", "{ broken")
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "dot_probe.json.tmpl (darwin/home)") || strings.Contains(stderr, "/minimal)") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the home profile only", err, stderr)
+	}
+}
+
+// A configuration whose managed list does not render is a finding of that
+// configuration; the others are still linted.
+func TestLintTemplatesManagedFailureIsAFinding(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoiignore", `{{ if eq .chezmoi.os "windows" }}{{ fail "no ignore for windows" }}{{ end }}`)
+	e.writeFile(t, "dot_probe.json.tmpl", "{ broken")
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "windows/default: cannot list the managed files") || !strings.Contains(stderr, "dot_probe.json.tmpl (darwin/default)") {
+		t.Errorf("lint templates = %v, stderr %q, want a finding for windows and the others linted", err, stderr)
+	}
+}
+
+// --as without a profile is ambiguous once several are declared.
+func TestViewAsNeedsAProfile(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	_, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux")
+	if err == nil || !strings.Contains(err.Error(), "home, minimal") {
+		t.Errorf("view --as linux = %v, want an error listing the profiles", err)
+	}
+	if out, _, err := newEnv(t).run(t, "", "view", "--matrix"); err != nil || !strings.Contains(out, "D=default") {
+		t.Errorf("view --matrix without a declaration = %q, %v, want the default profile", out, err)
+	}
+}
+
+// Review findings on the generic matrix, reproduced against real chezmoi.
+func TestMatrixReview(t *testing.T) {
+	t.Parallel()
+	// A [data] key this machine's config holds but no profile's render writes (a feature
+	// sub-answer, a key an older template wrote) reaches every configuration of view
+	// and edit, which render over this machine's config.
+	t.Run("a key only this machine's config holds does not leak into view --as", func(t *testing.T) {
+		t.Parallel()
+		e := newEnv(t)
+		e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+		e.appendConfig(t, "    machineOnly = \"from-this-machine\"\n")
+		e.writeFile(t, "dot_probe.tmpl", "probe={{ get . \"machineOnly\" | default \"none\" }}\n")
+		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".probe"), "--as", "linux,home")
+		if err != nil || strings.Contains(out, "from-this-machine") {
+			t.Errorf("view --as linux,home = %q, %v, want no value from this machine's config", out, err)
+		}
+	})
+	// --override-data merges tables recursively, so the {} a table key is zeroed to
+	// keeps every nested key of this machine's config.
+	t.Run("a table only this machine's config holds does not leak into view --as", func(t *testing.T) {
+		t.Parallel()
+		e := newEnv(t)
+		e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+		e.appendConfig(t, "[data.machineTable]\n    secret = \"from-this-machine\"\n")
+		e.writeFile(t, "dot_probe.tmpl", "probe={{ dig \"machineTable\" \"secret\" \"none\" . }}\n")
+		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".probe"), "--as", "linux,home")
+		if err != nil || strings.Contains(out, "from-this-machine") {
+			t.Errorf("view --as linux,home = %q, %v, want no value from this machine's config", out, err)
+		}
+	})
+	// Config [data] overrides .chezmoidata, so a key this machine's config overrides is
+	// zeroed in every configuration instead of falling back to the source's value,
+	// which is what chezmoi init with that profile would give.
+	t.Run("a machine override of a .chezmoidata key renders the source's value", func(t *testing.T) {
+		t.Parallel()
+		e := newEnv(t)
+		e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+		e.writeFile(t, ".chezmoidata/shared.toml", "shared = \"from-source\"\n")
+		e.appendConfig(t, "    shared = \"from-this-machine\"\n")
+		e.writeFile(t, "dot_probe.tmpl", "probe={{ .shared }}\n")
+		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".probe"), "--as", "linux,home")
+		if err != nil || !strings.Contains(out, "probe=from-source") {
+			t.Errorf("view --as linux,home = %q, %v, want the .chezmoidata value", out, err)
+		}
+	})
+}
+
+// chezmoi's other documented config template formats are rendered too, and a source
+// with none gets a config holding the declared answers. A template that breaks for
+// one configuration shows which configurations got the data.
+func TestConfigTemplateFormats(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, file, text, probe, want, notWant string
+	}{
+		{
+			name: "yaml", file: ".chezmoi.yaml.tmpl",
+			text:  "data:\n  fromTemplate: yaml-{{ .chezmoi.os }}\n",
+			probe: `{{ if eq (get . "fromTemplate" | default "") "yaml-linux" }}{ broken{{ end }}`,
+			want:  "(linux/default)", notWant: "(darwin/",
+		},
+		{
+			// chezmoi init reads .chezmoi.yml.tmpl and writes chezmoi.yml.
+			name: "yml", file: ".chezmoi.yml.tmpl",
+			text:  "data:\n  fromTemplate: yml-{{ .chezmoi.os }}\n",
+			probe: `{{ if eq (get . "fromTemplate" | default "") "yml-linux" }}{ broken{{ end }}`,
+			want:  "(linux/default)", notWant: "(darwin/",
+		},
+		{
+			name: "json", file: ".chezmoi.json.tmpl",
+			text:  `{"data": {"fromTemplate": "json-{{ .chezmoi.os }}"}}`,
+			probe: `{{ if eq (get . "fromTemplate" | default "") "json-windows" }}{ broken{{ end }}`,
+			want:  "(windows/default)", notWant: "(linux/",
+		},
+		{
+			name: "jsonc", file: ".chezmoi.jsonc.tmpl",
+			text:  "{\"data\": {\"fromTemplate\": \"jsonc-{{ .chezmoi.os }}\"} // chezmoi accepts JSONC\n}\n",
+			probe: `{{ if eq (get . "fromTemplate" | default "") "jsonc-linux" }}{ broken{{ end }}`,
+			want:  "(linux/default)", notWant: "(darwin/",
+		},
+		{
+			name: "none", probe: `{{ if get . "featureX" }}{ broken{{ end }}`,
+			want: "(darwin/home)", notWant: "/minimal)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			e := newEnv(t)
+			if tt.name == "none" {
+				e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+			}
+			if err := os.Remove(filepath.Join(e.src, ".chezmoi.toml.tmpl")); err != nil {
+				t.Fatal(err)
+			}
+			if tt.file != "" {
+				e.writeFile(t, tt.file, tt.text)
+			}
+			e.writeFile(t, "dot_probe.json.tmpl", tt.probe)
+			_, stderr, err := e.run(t, "", "lint", "templates")
+			if err == nil || !strings.Contains(stderr, tt.want) || strings.Contains(stderr, tt.notWant) {
+				t.Errorf("lint templates = %v, stderr %q, want a finding for %s only", err, stderr, tt.want)
+			}
+		})
+	}
+}
+
+// Several config templates fail as in chezmoi, instead of one winning.
+func TestMultipleConfigTemplatesFail(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoi.yaml.tmpl", "data: {}\n")
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	_, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,home")
+	if err == nil || !strings.Contains(err.Error(), "multiple config file templates: .chezmoi.toml.tmpl, .chezmoi.yaml.tmpl") {
+		t.Errorf("view --as with two config templates = %v, want the multiple config file templates error", err)
+	}
+	_, _, err = e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(err.Error(), "multiple config file templates") {
+		t.Errorf("lint templates = %v, want the multiple config file templates error", err)
+	}
+	yml := newEnv(t)
+	yml.writeFile(t, ".chezmoi.yml.tmpl", "data: {}\n")
+	if _, _, err = yml.run(t, "", "lint", "templates"); err == nil || !strings.Contains(err.Error(), "multiple config file templates: .chezmoi.toml.tmpl, .chezmoi.yml.tmpl") {
+		t.Errorf("lint templates with toml and yml = %v, want the multiple config file templates error", err)
+	}
+}
+
+// A seed value with control characters reaches the render intact: chezmoi parses the
+// TOML the tool writes.
+func TestSeedWithControlCharacters(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	if err := os.Remove(filepath.Join(e.src, ".chezmoi.toml.tmpl")); err != nil {
+		t.Fatal(err)
+	}
+	e.writeFile(t, ".chezmoidata/matrix.toml", "[matrix.seed]\nodd = \"a\\u0001b\\tc\\\"d\\\\e\"\n")
+	e.writeFile(t, "dot_probe.json.tmpl", "{{ if eq (len .odd) 9 }}{ broken{{ end }}")
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "dot_probe.json.tmpl (darwin/default)") {
+		t.Errorf("lint templates = %v, stderr %q, want the nine-character value rendered", err, stderr)
+	}
+}
+
+// appendConfig appends text to this machine's chezmoi config, whose last table is [data].
+func (e *env) appendConfig(t *testing.T, text string) {
+	t.Helper()
+	cfg := e.vars["CHEZMOI_CONFIG_FILE"]
+	b, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(cfg, append(b, text...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Standalone chezmoi-dots gets no CHEZMOI_SOURCE_DIR: the source dir comes from this
+// machine's config (sourceDir). A per-configuration config replaces that config, so a
+// render that does not also name the source reads chezmoi's default source dir.
+// The sandbox holds a decoy default source, so no real source is ever read.
+func TestStandaloneSourceDirReachesConfigurations(t *testing.T) {
+	t.Parallel()
+	t.Run("view --as renders the discovered source, not chezmoi's default", func(t *testing.T) {
+		t.Parallel()
+		e := newStandaloneEnv(t)
+		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,home")
+		if err != nil || !strings.Contains(out, "hello feature") || strings.Contains(out, "decoy") {
+			t.Errorf("view --as linux,home = %q, %v, want the discovered source rendered", out, err)
+		}
+	})
+	t.Run("lint templates lints the discovered source, not chezmoi's default", func(t *testing.T) {
+		t.Parallel()
+		e := newStandaloneEnv(t)
+		e.writeFile(t, "dot_probe.json.tmpl", "{ broken")
+		_, stderr, err := e.run(t, "", "lint", "templates")
+		if err == nil || !strings.Contains(stderr, "dot_probe.json.tmpl (darwin/home)") {
+			t.Errorf("lint templates = %v, stderr %q, want the broken template of the discovered source reported", err, stderr)
+		}
+	})
+}
+
+// newStandaloneEnv is newEnv run as standalone chezmoi-dots: no CHEZMOI_SOURCE_DIR, the
+// source dir named only by the machine config, and a decoy at chezmoi's default source
+// dir under a temp HOME.
+func newStandaloneEnv(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t)
+	home := e.sandbox
+	for _, d := range []string{filepath.Join(home, "XDG_DATA_HOME", "chezmoi"), filepath.Join(home, ".local", "share", "chezmoi")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "dot_note.tmpl"), []byte("decoy\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := e.vars["CHEZMOI_CONFIG_FILE"]
+	b, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(cfg, append([]byte("sourceDir = "+quote(e.src)+"\n"), b...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	delete(e.vars, "CHEZMOI_SOURCE_DIR")
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	return e
 }

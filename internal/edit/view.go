@@ -34,8 +34,46 @@ func (s *Service) List() {
 }
 
 type run struct {
-	label string
-	o     chez.Overrides
+	label   string
+	profile string
+	cfg     string
+	o       chez.Overrides
+}
+
+// profilesOf returns the profiles of entries in order of first appearance.
+func profilesOf(entries []matrix.Entry) []string {
+	var out []string
+	for _, e := range entries {
+		if !slices.Contains(out, e.Profile) {
+			out = append(out, e.Profile)
+		}
+	}
+	return out
+}
+
+func profilesOfRuns(runs []run) []string {
+	var out []string
+	for _, r := range runs {
+		if !slices.Contains(out, r.profile) {
+			out = append(out, r.profile)
+		}
+	}
+	return out
+}
+
+// resolveProfile fills in an empty profile of as when the matrix has exactly one, and
+// rejects one it does not have.
+func resolveProfile(as matrix.Config, profiles []string) (matrix.Config, error) {
+	list := strings.Join(profiles, ", ")
+	switch {
+	case as.Profile == "" && len(profiles) == 1:
+		as.Profile = profiles[0]
+	case as.Profile == "":
+		return as, fmt.Errorf("--as %s needs a profile (profiles: %s): %w", as.OS, list, ErrUsage)
+	case !slices.Contains(profiles, as.Profile):
+		return as, fmt.Errorf("unknown profile %q (profiles: %s): %w", as.Profile, list, ErrUsage)
+	}
+	return as, nil
 }
 
 func (s *Service) runs(ctx context.Context, mode ViewMode, as matrix.Config, scratch string) ([]run, error) {
@@ -46,10 +84,15 @@ func (s *Service) runs(ctx context.Context, mode ViewMode, as matrix.Config, scr
 	if err != nil {
 		return nil, fmt.Errorf("build the configuration matrix: %w", err)
 	}
+	if mode == ViewAs {
+		if as, err = resolveProfile(as, profilesOf(entries)); err != nil {
+			return nil, err
+		}
+	}
 	var out []run
 	for _, e := range entries {
 		if mode == ViewMatrix || e.Config == as {
-			out = append(out, run{label: e.Label(), o: e.Overrides})
+			out = append(out, run{label: e.Label(), profile: e.Profile, cfg: e.ConfigFile, o: e.Overrides})
 		}
 	}
 	return out, nil
@@ -92,7 +135,7 @@ func (s *Service) viewEntry(ctx context.Context, name, source, desc string, runs
 	g.SetLimit(4)
 	for i, r := range runs {
 		g.Go(func() error {
-			reach[i], fail[i] = s.reaches(ctx, r.o, source)
+			reach[i], fail[i] = s.reaches(ctx, r, source)
 			return nil
 		})
 	}
@@ -132,8 +175,9 @@ func (s *Service) renderMatrixReaches(runs []run, reach []string, fail []error) 
 	}
 
 	fmt.Fprintf(s.Out, "%s▸ reaches%s\n", st.B, st.O)
-	st.MatrixGrid(s.Out, func(osName, role string) (glyph, color string) {
-		idx, ok := runIndex[osName+"/"+role]
+	profiles := profilesOfRuns(runs)
+	st.MatrixGrid(s.Out, profiles, matrix.Short(profiles), func(osName, profile string) (glyph, color string) {
+		idx, ok := runIndex[osName+"/"+profile]
 		if !ok {
 			return term.SymSquareEmpty, st.D
 		}
@@ -180,8 +224,8 @@ func (s *Service) renderMatrixLegend(uniquePaths []string, pathColors map[string
 }
 
 // reaches lists, comma-separated, the targets one configuration builds from source.
-func (s *Service) reaches(ctx context.Context, o chez.Overrides, source string) (string, error) {
-	managed, err := s.CZ.Managed(ctx, o)
+func (s *Service) reaches(ctx context.Context, r run, source string) (string, error) {
+	managed, err := s.CZ.Managed(ctx, r.cfg, r.o)
 	if err != nil {
 		return "", fmt.Errorf("managed targets: %w", err)
 	}
@@ -215,7 +259,7 @@ func groupRenders(runs []run, rendered []*string) (groups []*renderGroup, missin
 // firstSource finds the source file of target, on this machine or else on any run.
 func (s *Service) firstSource(ctx context.Context, target string, runs []run) string {
 	for _, r := range append([]run{{}}, runs...) {
-		if p, err := s.CZ.SourcePath(ctx, target, r.o); err == nil {
+		if p, err := s.CZ.SourcePath(ctx, target, r.cfg, r.o); err == nil {
 			return p
 		}
 	}
@@ -236,7 +280,7 @@ func (s *Service) viewTarget(ctx context.Context, target string, mode ViewMode, 
 	fmt.Fprintf(s.Out, "%s▸ tree%s\n", st.B, st.O)
 	st.Tree(s.Out, s.Tree.Of(filepath.ToSlash(rel)), s.entrySources())
 	if mode == ViewHere {
-		out, err := s.CZ.Cat(ctx, target, nil)
+		out, err := s.CZ.Cat(ctx, target, "", nil)
 		if err != nil {
 			return fmt.Errorf("render %s: %w", target, err)
 		}
@@ -249,7 +293,7 @@ func (s *Service) viewTarget(ctx context.Context, target string, mode ViewMode, 
 	g.SetLimit(4)
 	for i, r := range runs {
 		g.Go(func() error {
-			if out, err := s.CZ.Cat(ctx, target, r.o); err == nil {
+			if out, err := s.CZ.Cat(ctx, target, r.cfg, r.o); err == nil {
 				text := string(out)
 				rendered[i] = &text
 			}
@@ -259,7 +303,7 @@ func (s *Service) viewTarget(ctx context.Context, target string, mode ViewMode, 
 	_ = g.Wait()
 	groups, missing := groupRenders(runs, rendered)
 	if mode == ViewMatrix {
-		s.renderTargetMatrix(groups, missing)
+		s.renderTargetMatrix(groups, missing, profilesOfRuns(runs))
 	}
 	for i, g := range groups {
 		if i == 0 {
@@ -275,7 +319,7 @@ func (s *Service) viewTarget(ctx context.Context, target string, mode ViewMode, 
 	return nil
 }
 
-func (s *Service) renderTargetMatrix(groups []*renderGroup, missing []string) {
+func (s *Service) renderTargetMatrix(groups []*renderGroup, missing, profiles []string) {
 	st := s.Style
 	palette := st.Palette()
 	fmt.Fprintf(s.Out, "%s▸ matrix%s\n", st.B, st.O)
@@ -285,8 +329,8 @@ func (s *Service) renderTargetMatrix(groups []*renderGroup, missing []string) {
 			labelGroup[lbl] = gIdx
 		}
 	}
-	st.MatrixGrid(s.Out, func(osName, role string) (glyph, color string) {
-		lbl := osName + "/" + role
+	st.MatrixGrid(s.Out, profiles, matrix.Short(profiles), func(osName, profile string) (glyph, color string) {
+		lbl := osName + "/" + profile
 		if gIdx, ok := labelGroup[lbl]; ok {
 			return term.SymSquareFilled, palette[gIdx%len(palette)]
 		}

@@ -29,8 +29,8 @@ Declarative registry-driven editing, package survey and drift detection, pin bum
 - **Status Snapshot (`dots status`)**: See the dotfiles checkout (branch, ahead/behind, local changes) and what `chezmoi apply` would change, without touching the network.
 - **Package Survey & Pins (`dots pkg status`, `dots pkg bump`)**: Query Homebrew, Apt, winget, uv, npm, and GitHub Releases to detect version drift against your pins. Also tracks commit-pinned archive externals. Update pins with comment-preserving text edits.
 - **Live Preview**: Editing can render live updates to a side pane using tmux or Windows Terminal; `live` is the internal pane command.
-- **Template Composition (`dots view`)**: Inspect a target's composition tree and rendered content, including previews across OS/role configurations.
-- **Template Linting (`dots lint`)**: Verify template syntax, detect unrendered delimiters, and validate cross-OS matrix configurations.
+- **Template Composition (`dots view`)**: Inspect a target's composition tree and rendered content, including previews across OS/profile configurations.
+- **Template Linting (`dots lint`)**: Verify template syntax, detect unrendered delimiters, and render shell, zsh, PowerShell and JSON templates for every OS/profile configuration and lint them.
 
 ---
 
@@ -42,13 +42,22 @@ Declare `chezmoi-dots` as an external in your dotfiles repository:
 
 ```toml
 # .chezmoiexternal.toml.tmpl
-{{- $v := "0.3.0" }}
+{{- /* Set $v to the latest release version (without the leading v), see below. */ -}}
+{{- $v := "X.Y.Z" }}
 {{- $exe := ternary ".exe" "" (eq .chezmoi.os "windows") }}
 [".local/bin/chezmoi-dots{{ $exe }}"]
 type = "file"
 url = "https://github.com/giocaizzi/chezmoi-dots/releases/download/v{{ $v }}/chezmoi-dots_{{ $v }}_{{ .chezmoi.os }}_{{ .chezmoi.arch }}{{ $exe }}"
 executable = true
 ```
+
+Replace `X.Y.Z` with the [latest release](https://github.com/giocaizzi/chezmoi-dots/releases/latest); the version is the tag without the `v`:
+
+```bash
+gh release view --repo giocaizzi/chezmoi-dots --json tagName -q .tagName
+```
+
+To keep it current, declare it in your package registry and let `chezmoi dots pkg bump` update it; see [Update a dotfiles repository to the new release](docs/release.md#update-a-dotfiles-repository-to-the-new-release).
 
 Release assets exist for darwin/amd64, darwin/arm64, linux/amd64, linux/arm64 and windows/amd64. Optionally add `checksum.sha256` from the release's `checksums.txt`.
 
@@ -94,8 +103,8 @@ go install github.com/giocaizzi/chezmoi-dots/cmd/chezmoi-dots@latest
 Use `dots <command> --help` for command-specific options. See the full
 [command reference](docs/cli.md) for defaults, environment, parsing and exit
 semantics, including the internal `live` command. The day-to-day procedures are
-in the [everyday workflow](docs/workflow.md) runbook. For source builds, see
-[Build and install locally](docs/local-build-install.md).
+in the [everyday workflow](docs/workflow.md) runbook, and the format of `.chezmoidata/packages.toml` that `pkg` and `lint packages` read is in the [package registry](docs/registry.md) reference. For source builds, see
+[Build and install locally](docs/local-build-install.md); maintainers publish versions with the [release runbook](docs/release.md).
 
 See [Apply and publish source edits](docs/README.md#apply-and-publish-source-edits) for the chezmoi settings that control apply and Git automation.
 

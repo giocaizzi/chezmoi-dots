@@ -51,6 +51,9 @@ func TestSelectionTemplateThroughChezmoi(t *testing.T) {
 	t.Parallel()
 	bin, err := exec.LookPath("chezmoi")
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("chezmoi is not on PATH: CI installs it so this test never skips there")
+		}
 		t.Skip("chezmoi is not on PATH")
 	}
 	src, dst := t.TempDir(), t.TempDir()
@@ -69,6 +72,10 @@ func TestSelectionTemplateThroughChezmoi(t *testing.T) {
 	}
 
 	cmd := exec.CommandContext(t.Context(), bin, "--source", src, "--config", cfg, "--destination", dst, "execute-template")
+	home := t.TempDir()
+	cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home,
+		"XDG_CONFIG_HOME="+filepath.Join(home, "config"), "XDG_DATA_HOME="+filepath.Join(home, "data"),
+		"XDG_STATE_HOME="+filepath.Join(home, "state"), "XDG_CACHE_HOME="+filepath.Join(home, "cache"))
 	cmd.Stdin = bytes.NewReader([]byte(inventory.SelectionTemplate))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

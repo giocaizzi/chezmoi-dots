@@ -14,7 +14,6 @@ var name = regexp.MustCompile(`^[A-Za-z0-9._][A-Za-z0-9._-]*$`)
 
 func shells() []string { return []string{"posix", "powershell"} }
 func oses() []string   { return []string{"darwin", "linux", "windows"} }
-func roles() []string  { return []string{"personal", "work", "light"} }
 func allowed() []string {
 	return []string{"cmd", "posix", "powershell", "shells", "os", "machines", "why"}
 }
@@ -75,7 +74,7 @@ func validateAlias(n string, a map[string]any) []finding.Finding {
 		}
 	}
 	checkSubset(a, "os", oses(), bad)
-	checkSubset(a, "machines", roles(), bad)
+	checkMachines(a, bad)
 	return out
 }
 
@@ -141,4 +140,15 @@ func sortedKeys(m map[string]any) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// checkMachines reports a machines value that is not a list of non-empty names.
+func checkMachines(a map[string]any, bad func(string, ...any)) {
+	v, ok := a["machines"]
+	if !ok {
+		return
+	}
+	if got, isList := stringList(v); !isList || slices.Contains(got, "") {
+		bad("machines must be a list of non-empty names")
+	}
 }

@@ -11,7 +11,7 @@ ARGUMENTS
   Without a source flag the package managers on this machine are asked: brew and cask on macOS, apt on Linux, winget on Windows, uv and npm everywhere. Only this machine is looked at, never a public index; the keys of other OSes come only from flags or from running pkg add there. Detected sources are confirmed one by one on a terminal, else need --yes. Any source flag turns detection off.
   An existing package gets the keys it lacks; keys it has are never changed.
   Release mode (--release) needs --version, --url (with {version}) and one or more --target; it downloads each asset to record its sha256 (--dry-run does not).
-  --github reads the latest release of owner/repo (GH_TOKEN or GITHUB_TOKEN raise the rate limit) and proposes the entry from its asset names: darwin, linux and windows on amd64 and arm64 are recognized, checksums, signatures and installers are left out, archives win over bare binaries, a tie is reported as ambiguous. The proposal needs a yes on a terminal, else --yes; --dry-run still reads GitHub but downloads no archive.
+  --github reads the latest release of owner/repo (GH_TOKEN or GITHUB_TOKEN raise the rate limit) and proposes the entry from its asset names: darwin, linux and windows on amd64 and arm64 are recognized, checksums, signatures and installers are left out, archives win over bare binaries, a tie is reported as ambiguous. For archives, each target's archive is downloaded before the question to read the path of the binary from its contents (.tar.gz, .tgz and .zip are listed, .tar.xz is not) and to compute the checksums; the path is marked found, not found or unchecked. The proposal needs a yes on a terminal, else --yes; --dry-run still reads GitHub but downloads no archive and leaves the path unchecked.
   The entry is added to .chezmoidata/packages.toml, which is validated afterwards, then staged, committed and pushed alone as far as the chezmoi git settings ask. An existing release is never changed.
 
 OPTIONS
@@ -24,7 +24,7 @@ OPTIONS
   --npm  install with npm; --npm=<spec> when the spec differs from the name (default: "")
   --release  add a pinned release binary instead of a package (default: "false")
   --requires <answer>  install only when this [data] answer is set (default: "")
-  --roles <roles>  limit to roles (comma list of personal, work, light) (default: "")
+  --roles <roles>  limit to roles (comma list of role names your templates define) (default: "")
   --target <os/arch=name>  repeatable release os/arch=name target (default: "")
   --url <template>  release download template with {version} (and {target}) (default: "")
   --uv  install with uv tool; --uv=<spec> when the spec differs from the name (default: "")
@@ -41,6 +41,6 @@ ENVIRONMENT
 EXAMPLES
   chezmoi dots pkg add wget --brew --apt
   chezmoi dots pkg add wget
-  chezmoi dots pkg add example-app --cask example-app --roles personal
+  chezmoi dots pkg add example-app --cask example-app --roles home
   chezmoi dots pkg add example-tool --release --version 1.2.3 --url https://example.com/{version}/tool-{target}.tar.gz --target linux/amd64=linux-x86_64
   chezmoi dots pkg add example-tool --github octocat/example-tool --dry-run

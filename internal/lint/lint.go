@@ -3,13 +3,17 @@
 package lint
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
@@ -52,7 +56,7 @@ func (l Linter) Run(ctx context.Context, name string) ([]finding.Finding, error)
 	case "secrets":
 		return l.secrets(ctx)
 	case "matrix":
-		return l.matrix()
+		return l.matrix(ctx)
 	case "templates":
 		return l.templates(ctx)
 	}
@@ -73,48 +77,7 @@ func (l Linter) aliases(ctx context.Context) ([]finding.Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := aliasreg.Validate(data)
-	// The private registry needs this machine's age key; where there is none it is skipped.
-	realData, err := l.Real.Data(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	if identity := ageIdentity(realData); identity != "" {
-		if _, statErr := os.Stat(identity); statErr == nil {
-			private, privErr := l.privateAliases(ctx)
-			if privErr != nil {
-				return nil, privErr
-			}
-			out = append(out, private...)
-		}
-	}
-	return out, nil
-}
-
-// privateAliases validates the encrypted private registry, decrypted with this machine's key.
-func (l Linter) privateAliases(ctx context.Context) ([]finding.Finding, error) {
-	tmpl := `{{ include ".aliases.private.toml.age" | decrypt | fromToml | toJson }}`
-	b, err := l.Real.Execute(ctx, nil, []byte(tmpl), false)
-	if err != nil {
-		return nil, err
-	}
-	var private map[string]any
-	if err = json.Unmarshal(b, &private); err != nil {
-		return nil, fmt.Errorf("decode private aliases: %w", err)
-	}
-	var out []finding.Finding
-	for _, f := range aliasreg.Validate(private) {
-		out = append(out, finding.New("private "+f.Where, "%s", f.Message))
-	}
-	return out, nil
-}
-
-func ageIdentity(data map[string]any) string {
-	c, _ := data["chezmoi"].(map[string]any)
-	cfg, _ := c["config"].(map[string]any)
-	age, _ := cfg["age"].(map[string]any)
-	id, _ := age["identity"].(string)
-	return id
+	return aliasreg.Validate(data), nil
 }
 
 func (l Linter) packages(ctx context.Context) ([]finding.Finding, error) {
@@ -133,52 +96,67 @@ func (l Linter) secrets(ctx context.Context) ([]finding.Finding, error) {
 	return vaultcheck.Validate(data), nil
 }
 
-// matrix checks the config template's [data] keys against what the matrix seeds:
-// they are written apart and must agree.
-func (l Linter) matrix() ([]finding.Finding, error) {
-	tmpl, err := os.ReadFile(filepath.Join(l.Src, ".chezmoi.toml.tmpl"))
-	if err != nil {
-		return nil, fmt.Errorf("read config template: %w", err)
-	}
-	var out []finding.Finding
-	var seeded []string
-	for k := range matrix.Seed("personal", nil, nil) {
-		seeded = append(seeded, k)
-	}
-	slices.Sort(seeded)
-	if got := matrix.DataKeys(tmpl); !slices.Equal(got, seeded) {
-		out = append(out, finding.New(".chezmoi.toml.tmpl", "[data] keys %v differ from the keys the configuration matrix seeds %v (internal/matrix Seed)", got, seeded))
-	}
-	return out, nil
-}
-
-// templates renders the script and alias templates for every configuration and runs
-// the linter of their language over the result; a template that renders empty does
-// not apply to that configuration and is skipped, like chezmoi skips it.
-func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
-	entries, err := matrix.Build(ctx, l.Real, l.Src, l.Scratch)
+// matrix checks the matrix declaration in the chezmoi data.
+func (l Linter) matrix(ctx context.Context) ([]finding.Finding, error) {
+	data, err := l.Iso.Data(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	// Also a single harness (the first the config template offers), which gates the
-	// harness scripts differently.
-	if first, ok := l.firstHarness(); ok {
-		for _, e := range slices.Clone(entries) {
-			if e.Role != "light" {
-				e.Overrides = e.Overrides.Clone(chez.Overrides{"harnesses": []string{first}})
-				entries = append(entries, e)
-			}
-		}
+	_, fs := matrix.ParseSpec(data)
+	return fs, nil
+}
+
+// templates renders the script and alias templates for every configuration, and for
+// every variant the matrix declares, and runs
+// the linter of their language over the result; a template that renders empty does
+// not apply to that configuration and is skipped, like chezmoi skips it.
+func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
+	data, err := l.Iso.Data(ctx, nil)
+	if err != nil {
+		return nil, err
 	}
+	spec, err := matrix.SpecFrom(data)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := matrix.Build(ctx, l.Real, l.Src, l.Scratch, spec)
+	if err != nil {
+		return nil, err
+	}
+	entries = spec.Expand(entries)
 	files, err := l.templateFiles()
 	if err != nil {
 		return nil, err
 	}
+	// A template is rendered only where chezmoi manages it: .chezmoiignore, rendered
+	// with the configuration's data, keeps gated templates (secrets, network) out.
+	// A configuration whose managed list fails is a finding and is not rendered; the
+	// others go on.
 	var (
 		out []finding.Finding
 		mu  sync.Mutex
-		g   errgroup.Group
 	)
+	managed := make([]map[string]bool, len(entries))
+	var mg errgroup.Group
+	mg.SetLimit(4)
+	for i, e := range entries {
+		mg.Go(func() error {
+			m, err := l.Iso.Managed(ctx, e.ConfigFile, e.Overrides)
+			if err != nil {
+				mu.Lock()
+				out = append(out, finding.New(e.Label(), "cannot list the managed files: %v", err))
+				mu.Unlock()
+				return nil
+			}
+			managed[i] = map[string]bool{}
+			for _, src := range m {
+				managed[i][src] = true
+			}
+			return nil
+		})
+	}
+	_ = mg.Wait()
+	var g errgroup.Group
 	g.SetLimit(8)
 	for _, f := range files {
 		tmpl, err := os.ReadFile(filepath.Join(l.Src, filepath.FromSlash(f)))
@@ -186,6 +164,9 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 			return nil, fmt.Errorf("read %s: %w", f, err)
 		}
 		for i, e := range entries {
+			if !managed[i][f] {
+				continue
+			}
 			g.Go(func() error {
 				fs := l.renderAndLint(ctx, f, tmpl, e, i)
 				mu.Lock()
@@ -199,49 +180,197 @@ func (l Linter) templates(ctx context.Context) ([]finding.Finding, error) {
 	return out, nil
 }
 
-// firstHarness returns the first harness choice of the config template; ok is false
-// when the template offers none.
-func (l Linter) firstHarness() (string, bool) {
-	tmpl, err := os.ReadFile(filepath.Join(l.Src, ".chezmoi.toml.tmpl"))
-	if err != nil {
-		return "", false
-	}
-	choices := matrix.Harnesses(tmpl)
-	if len(choices) == 0 {
-		return "", false
-	}
-	return choices[0], true
-}
-
-// templateFiles lists the templates worth rendering whole: every script, the alias
-// files if present. Partials need arguments and the secrets files read the
-// Secrets Manager, so they are checked through the templates that use them.
+// templateFiles lists the templates worth rendering whole: every `.tmpl` file whose
+// target is a script or data file linterArgv handles. It skips what cannot render
+// standalone or must not run: hidden directories (partials need arguments) other
+// than .chezmoiscripts, chezmoi's own `.chezmoi*` templates, encrypted, symlink and
+// modify files, and templates whose actions call a password-manager, secret or
+// decrypt function, which would reach external services. The matrix declaration is
+// the main isolation mechanism. Paths are sorted and slash-separated.
 func (l Linter) templateFiles() ([]string, error) {
 	var out []string
-	candidates := []string{
-		"dot_config/shell/aliases.sh.tmpl",
-		"dot_config/shell/omz-aliases.zsh.tmpl",
-		"dot_config/powershell/aliases.ps1.tmpl",
-	}
-	for _, c := range candidates {
-		if _, err := os.Stat(filepath.Join(l.Src, filepath.FromSlash(c))); err == nil {
-			out = append(out, c)
+	err := filepath.WalkDir(l.Src, func(p string, d iofs.DirEntry, err error) error {
+		if err != nil {
+			return err
 		}
-	}
-	scripts, err := filepath.Glob(filepath.Join(l.Src, ".chezmoiscripts", "*.tmpl"))
+		rel, err := filepath.Rel(l.Src, p)
+		if err != nil {
+			return fmt.Errorf("relative path of %s: %w", p, err)
+		}
+		if rel == "." {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if hiddenPath(rel) {
+			if d.IsDir() {
+				return iofs.SkipDir
+			}
+			return nil
+		}
+		if !d.Type().IsRegular() || !templateName(filepath.Base(rel)) {
+			return nil
+		}
+		b, err := os.ReadFile(p) //nolint:gosec // p comes from walking the source dir
+		if err != nil {
+			return fmt.Errorf("read %s: %w", rel, err)
+		}
+		if callsSecret(l.Src, b) {
+			return nil
+		}
+		out = append(out, rel)
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("glob scripts: %w", err)
+		return nil, fmt.Errorf("walk %s: %w", l.Src, err)
 	}
-	for _, p := range scripts {
-		rel, _ := filepath.Rel(l.Src, p)
-		out = append(out, filepath.ToSlash(rel))
-	}
+	sort.Strings(out)
 	return out, nil
 }
 
+// hiddenPath reports whether a slash-separated source path has a component that
+// starts with "." other than .chezmoiscripts.
+func hiddenPath(rel string) bool {
+	for c := range strings.SplitSeq(rel, "/") {
+		if strings.HasPrefix(c, ".") && c != ".chezmoiscripts" {
+			return true
+		}
+	}
+	return false
+}
+
+// templateName reports whether a source base name is a plain template the linter can
+// render: a `.tmpl` file with a handled target extension that is not a chezmoi
+// config template and not an encrypted, symlink or modify file.
+func templateName(base string) bool {
+	target, ok := strings.CutSuffix(base, ".tmpl")
+	if !ok || strings.HasPrefix(base, ".chezmoi") {
+		return false
+	}
+	// the target extensions linterArgv handles
+	if !slices.Contains([]string{".sh", ".bash", ".zsh", ".ps1", ".json"}, strings.ToLower(filepath.Ext(target))) {
+		return false
+	}
+	// chezmoi's source-name attribute prefixes
+	attributePrefixes := []string{
+		"after_", "before_", "create_", "dot_", "empty_", "encrypted_", "exact_", "executable_",
+		"external_", "literal_", "modify_", "once_", "onchange_", "private_", "readonly_",
+		"remove_", "run_", "symlink_",
+	}
+	for rest, found := base, true; found; {
+		found = false
+		for _, pre := range attributePrefixes {
+			after, ok := strings.CutPrefix(rest, pre)
+			if !ok {
+				continue
+			}
+			switch pre {
+			case "encrypted_", "symlink_", "modify_":
+				return false
+			}
+			rest, found = after, true
+			break
+		}
+	}
+	return true
+}
+
+var (
+	// templateAction matches one `{{ ... }}` action.
+	templateAction = regexp.MustCompile(`(?s)\{\{.*?\}\}`)
+	// secretFunc matches a call to a chezmoi password-manager, secret or decrypt
+	// function; field accesses (.pass) and variables ($pass) do not match.
+	secretFunc = regexp.MustCompile(`(?:^|[^\w.$])(?:` +
+		`(?:bitwarden|onepassword|keepassxc|lastpass|gopass|keeper|awsSecretsManager|dashlane|doppler|ejson|protonPass|rbw)\w*` +
+		`|pass|passFields|passRaw|passhole|vault|secret|secretJSON|azureKeyVault|keyring|decrypt)\b`)
+)
+
+// partialRef matches the string-literal name of a `template` or `includeTemplate`
+// call inside an action. Calls whose name is not a literal (a variable, a printf) are
+// not followed.
+var partialRef = regexp.MustCompile("\\b(template|includeTemplate)\\s+(?:\"([^\"]+)\"|`([^`]+)`)")
+
+// callsSecret reports whether a template calls a secret or decrypt function, in its
+// own actions or in any partial it reaches, transitively: a `template` call names a
+// file under src's .chezmoitemplates; an `includeTemplate` call is looked up there
+// first and then relative to src, as chezmoi does.
+func callsSecret(src string, tmpl []byte) bool {
+	return reachesSecret(src, tmpl, map[string]bool{})
+}
+
+// reachesSecret is callsSecret with the set of partials already visited, which guards
+// against cycles.
+func reachesSecret(src string, tmpl []byte, seen map[string]bool) bool {
+	for _, a := range templateAction.FindAll(tmpl, -1) {
+		body := a[2 : len(a)-2]
+		if secretFunc.Match(body) {
+			return true
+		}
+		for _, m := range partialRef.FindAllSubmatch(body, -1) {
+			if partialReachesSecret(src, string(m[1]), string(m[2])+string(m[3]), seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// partialReachesSecret resolves one partial reference and reports whether the file it
+// names reaches a secret function. The first directory holding the file wins.
+func partialReachesSecret(src, keyword, name string, seen map[string]bool) bool {
+	if !filepath.IsLocal(filepath.FromSlash(name)) {
+		return false
+	}
+	dirs := []string{".chezmoitemplates"}
+	if keyword == "includeTemplate" {
+		dirs = append(dirs, ".")
+	}
+	for _, dir := range dirs {
+		path := filepath.Join(src, dir, filepath.FromSlash(name))
+		b, err := os.ReadFile(path) //nolint:gosec // name is checked local
+		if err != nil {
+			continue // a missing partial calls nothing
+		}
+		if seen[path] {
+			return false
+		}
+		seen[path] = true
+		return reachesSecret(src, b, seen)
+	}
+	return false
+}
+
+// linterArgv picks the linter from the target extension: shellcheck for shell, zsh -n
+// for zsh, a PowerShell parse for ps1 (Windows configurations only), and a JSON
+// validity check (jsonCheck) for json. Shell without a shebang is checked as bash. A
+// nil argv with jsonCheck false means nothing to run.
+func linterArgv(ext string, rendered []byte, path, goos string) (argv []string, jsonCheck bool) {
+	switch ext {
+	case ".json":
+		return nil, true
+	case ".sh", ".bash":
+		argv = []string{"shellcheck", "-e", "SC2034"}
+		if !bytes.HasPrefix(rendered, []byte("#!")) {
+			argv = append(argv, "-s", "bash")
+		}
+		return append(argv, path), false
+	case ".zsh":
+		return []string{"zsh", "-n", path}, false
+	case ".ps1":
+		if goos != "windows" {
+			return nil, false
+		}
+		return []string{"pwsh", "-NoProfile", "-Command", fmt.Sprintf(
+			"$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('%s', [ref]$null, [ref]$e); if ($e) { $e; exit 1 }", path)}, false
+	}
+	return nil, false
+}
+
+// renderAndLint renders one template for one matrix entry and lints the result with
+// the linter its target extension selects; a template that renders empty does not
+// apply to that entry and is skipped.
 func (l Linter) renderAndLint(ctx context.Context, file string, tmpl []byte, e matrix.Entry, n int) []finding.Finding {
 	where := fmt.Sprintf("%s (%s)", file, e.Label())
-	rendered, err := l.Iso.Execute(ctx, e.Overrides, tmpl, false)
+	rendered, err := l.Iso.With("--config", e.ConfigFile).Execute(ctx, e.Overrides, tmpl, false)
 	if err != nil {
 		return []finding.Finding{finding.New(where, "does not render: %v", err)}
 	}
@@ -253,23 +382,14 @@ func (l Linter) renderAndLint(ctx context.Context, file string, tmpl []byte, e m
 	if err := os.WriteFile(path, rendered, 0o600); err != nil { //nolint:gosec // path is inside the linter's own scratch dir
 		return []finding.Finding{finding.New(where, "write render: %v", err)}
 	}
-	var argv []string
-	switch {
-	case ext == ".json":
+	argv, jsonCheck := linterArgv(ext, rendered, path, e.OS)
+	if jsonCheck {
 		if !json.Valid(rendered) {
 			return []finding.Finding{finding.New(where, "renders invalid JSON")}
 		}
 		return nil
-	case ext == ".sh" && strings.Contains(file, "aliases"):
-		argv = []string{"shellcheck", "-s", "bash", path}
-	case ext == ".sh":
-		argv = []string{"shellcheck", "-e", "SC2034", path}
-	case ext == ".zsh":
-		argv = []string{"zsh", "-n", path}
-	case ext == ".ps1" && e.OS == "windows":
-		argv = []string{"pwsh", "-NoProfile", "-Command", fmt.Sprintf(
-			"$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('%s', [ref]$null, [ref]$e); if ($e) { $e; exit 1 }", path)}
-	default:
+	}
+	if argv == nil {
 		return nil
 	}
 	if _, err := l.LookPath(argv[0]); err != nil {

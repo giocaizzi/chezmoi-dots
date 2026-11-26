@@ -16,6 +16,11 @@ func TestPalette(t *testing.T) {
 	}
 }
 
+var (
+	profiles = []string{"home", "minimal", "work"}
+	short    = map[string]string{"home": "H", "minimal": "M", "work": "W"}
+)
+
 func TestMatrixGrid_NoColor(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
@@ -34,12 +39,12 @@ func TestMatrixGrid_NoColor(t *testing.T) {
 		}
 	}
 
-	s.MatrixGrid(&buf, cell)
+	s.MatrixGrid(&buf, profiles, short, cell)
 
-	want := "            personal    work     light\n" +
-		"darwin         ■         ■         ■\n" +
-		"linux          □         □         □\n" +
-		"windows        ·         ·         ·\n"
+	want := "              H  M  W\n" +
+		"darwin        ■  ■  ■\n" +
+		"linux         □  □  □\n" +
+		"windows       ·  ·  ·\n"
 
 	if diff := cmp.Diff(want, buf.String()); diff != "" {
 		t.Errorf("MatrixGrid() mismatch (-want +got):\n%s", diff)
@@ -55,14 +60,14 @@ func TestMatrixGrid_Colored(t *testing.T) {
 		return SymSquareFilled, s.G
 	}
 
-	s.MatrixGrid(&buf, cell)
+	s.MatrixGrid(&buf, profiles, short, cell)
 
 	g := "\x1b[32m" + SymSquareFilled + "\x1b[0m"
-	tail := g + "         " + g + "         " + g + "\n"
-	want := "            personal    work     light\n" +
-		"darwin         " + tail +
-		"linux          " + tail +
-		"windows        " + tail
+	tail := g + "  " + g + "  " + g + "\n"
+	want := "              H  M  W\n" +
+		"darwin        " + tail +
+		"linux         " + tail +
+		"windows       " + tail
 
 	if diff := cmp.Diff(want, buf.String()); diff != "" {
 		t.Errorf("MatrixGrid() colored mismatch (-want +got):\n%s", diff)
@@ -91,7 +96,7 @@ func TestOverviewTable_NoColor(t *testing.T) {
 		},
 	}
 
-	s.OverviewTable(&buf, rows)
+	s.OverviewTable(&buf, 3, rows)
 
 	want := "  ENTRY                 DARWIN    LINUX     WINDOWS   TARGETS\n" +
 		"  ghostty               ■ ■ □     ■ ■ □     · · ·     2 targets (macOS, Linux)\n" +
@@ -118,12 +123,39 @@ func TestOverviewTable_Colored(t *testing.T) {
 		},
 	}
 
-	s.OverviewTable(&buf, rows)
+	s.OverviewTable(&buf, 3, rows)
 
 	want := "\x1b[2m  ENTRY                 DARWIN    LINUX     WINDOWS   TARGETS\x1b[0m\n" +
 		"  \x1b[35mghostty\x1b[0m               " + twoFilledOneEmpty + "     " + twoFilledOneEmpty + "     · · ·     \x1b[2m2 targets (macOS, Linux)\x1b[0m\n"
 
 	if diff := cmp.Diff(want, buf.String()); diff != "" {
 		t.Errorf("OverviewTable() colored mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestMatrixGrid_WideLabels(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	Style{}.MatrixGrid(&buf, []string{"dev", "devops"}, map[string]string{"dev": "Dev", "devops": "Devo"}, func(_, _ string) (string, string) {
+		return SymSquareFilled, ""
+	})
+	want := "              Dev   Devo\n" +
+		"darwin        ■     ■\n" +
+		"linux         ■     ■\n" +
+		"windows       ■     ■\n"
+	if diff := cmp.Diff(want, buf.String()); diff != "" {
+		t.Errorf("MatrixGrid() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestOverviewTable_ManyProfiles(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	rows := []OverviewRow{{Entry: "git", Darwin: "■ ■ ■ ■ ■ ■", Linux: "■ ■ ■ ■ ■ ■", Windows: "■ ■ ■ ■ ■ ■", Targets: "1 target"}}
+	Style{}.OverviewTable(&buf, 6, rows)
+	want := "  ENTRY                 DARWIN       LINUX        WINDOWS      TARGETS\n" +
+		"  git                   ■ ■ ■ ■ ■ ■  ■ ■ ■ ■ ■ ■  ■ ■ ■ ■ ■ ■  1 target\n"
+	if diff := cmp.Diff(want, buf.String()); diff != "" {
+		t.Errorf("OverviewTable() mismatch (-want +got):\n%s", diff)
 	}
 }

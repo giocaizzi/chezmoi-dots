@@ -186,7 +186,7 @@ func TestHelpOptionDefaults(t *testing.T) {
 		options  []string
 		defValue string
 	}{
-		{"view", []string{"--as <os[,role]>"}, ""},
+		{"view", []string{"--as <os[,profile]>"}, ""},
 		{"view", []string{"--matrix"}, "false"},
 		{"add", []string{"--name <name>", "--desc <description>"}, ""},
 		{"add", []string{"--template", "--encrypt", "--local"}, "false"},
