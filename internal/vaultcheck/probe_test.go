@@ -3,6 +3,7 @@ package vaultcheck_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -110,10 +111,19 @@ func TestCheck(t *testing.T) {
 			want: vaultcheck.Result{Name: "example-vault", Kind: "bws", State: vaultcheck.Fail, Detail: "bws not found", Hint: "install bws or set command in .chezmoidata/secrets.toml"},
 		},
 		{
-			name: "keyring missing", entry: bwsEntry, data: withProject, have: []string{"bws"}, keyring: &fakeKeyring{err: errors.New("boom")},
+			name: "keyring missing", entry: bwsEntry, data: withProject, have: []string{"bws"}, keyring: &fakeKeyring{err: fmt.Errorf("%w: not found", vaultcheck.ErrNoToken)},
 			want: vaultcheck.Result{
 				Name: "example-vault", Kind: "bws", State: vaultcheck.Fail, Detail: "no access token in the keyring (service bws, user access-token)",
 				Hint: "chezmoi secret keyring set --service=bws --user=access-token",
+			},
+		},
+		{
+			name: "keyring read failure", entry: bwsEntry, data: withProject, have: []string{"bws"},
+			keyring: &fakeKeyring{err: errors.New("chezmoi secret keyring get: exit status 1: no secret service available\nsecond line")},
+			want: vaultcheck.Result{
+				Name: "example-vault", Kind: "bws", State: vaultcheck.Fail,
+				Detail: "keyring read failed: chezmoi secret keyring get: exit status 1: no secret service available",
+				Hint:   "check that chezmoi can read the OS keyring: chezmoi secret keyring get --service=bws --user=access-token",
 			},
 		},
 		{
@@ -327,10 +337,14 @@ func TestChezmoiKeyring_Get(t *testing.T) {
 		reply   script
 		want    string
 		wantErr string // substring; empty means success
+		noToken bool   // the error is ErrNoToken
 	}{
 		{name: "trimmed value", reply: script{stdout: token + "\n"}, want: token},
-		{name: "error carries stderr not stdout", reply: script{stdout: "stdout-secret", stderr: "keyring: not found\n", err: errors.New("exit status 1")}, wantErr: "keyring: not found"},
-		{name: "empty", reply: script{stdout: "\n"}, wantErr: "empty"},
+		{name: "error carries stderr not stdout", reply: script{stdout: "stdout-secret", stderr: "keyring: not found\n", err: errors.New("exit status 1")}, wantErr: "keyring: not found", noToken: true},
+		{name: "empty", reply: script{stdout: "\n"}, wantErr: "empty", noToken: true},
+		{name: "not found any case", reply: script{stderr: "Error: Secret Not Found\n", err: errors.New("exit status 1")}, wantErr: "Not Found", noToken: true},
+		{name: "other failure first line", reply: script{stdout: "stdout-secret", stderr: "\n no secret service\nmore\n", err: errors.New("exit status 1")}, wantErr: "exit status 1: no secret service"},
+		{name: "failure without stderr", reply: script{err: errors.New("exit status 1")}, wantErr: "exit status 1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -344,6 +358,9 @@ func TestChezmoiKeyring_Get(t *testing.T) {
 			}
 			if (err == nil) != (tt.wantErr == "") || got != tt.want {
 				t.Fatalf("Get() = %q, %v; want %q, error containing %q", got, err, tt.want, tt.wantErr)
+			}
+			if errors.Is(err, vaultcheck.ErrNoToken) != tt.noToken {
+				t.Errorf("errors.Is(err, ErrNoToken) = %v, want %v", !tt.noToken, tt.noToken)
 			}
 			if err != nil && (!strings.Contains(err.Error(), tt.wantErr) || strings.Contains(err.Error(), "stdout-secret")) {
 				t.Errorf("error %q lacks stderr or carries stdout", err)

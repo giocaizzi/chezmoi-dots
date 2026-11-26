@@ -57,19 +57,28 @@ type ChezmoiKeyring struct {
 	Chezmoi []string // the chezmoi binary and its global args (--config, --source)
 }
 
-// Get implements Keyring. Its error carries chezmoi's stderr, never its stdout.
+// ErrNoToken is what a Keyring returns when the item is not there, as opposed to a
+// failure to read the keyring at all.
+var ErrNoToken = errors.New("no access token")
+
+// Get implements Keyring. Its error carries the first line of chezmoi's stderr, never
+// its stdout. A missing item is ErrNoToken.
 func (k ChezmoiKeyring) Get(ctx context.Context, service, user string) (string, error) {
 	var stdout, stderr bytes.Buffer
 	args := append(append([]string{}, k.Chezmoi...), "secret", "keyring", "get", "--service", service, "--user", user)
 	if err := k.Runner.Run(ctx, chez.Cmd{Args: args, Stdout: &stdout, Stderr: &stderr}); err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return "", fmt.Errorf("chezmoi secret keyring get: %w: %s", err, msg)
+		line := firstLine(stderr.String())
+		if strings.Contains(strings.ToLower(stderr.String()), "not found") {
+			return "", fmt.Errorf("%w: %s", ErrNoToken, line)
+		}
+		if line != "" {
+			return "", fmt.Errorf("chezmoi secret keyring get: %w: %s", err, line)
 		}
 		return "", fmt.Errorf("chezmoi secret keyring get: %w", err)
 	}
 	v := strings.TrimRight(stdout.String(), "\r\n")
 	if v == "" {
-		return "", errors.New("empty")
+		return "", fmt.Errorf("%w: the keyring value is empty", ErrNoToken)
 	}
 	return v, nil
 }
@@ -228,9 +237,13 @@ func (p Prober) timedOut(r Result) Result {
 
 func (p Prober) checkBws(ctx context.Context, r Result, e Entry, bin, project string) Result {
 	token, err := p.Keyring.Get(ctx, e.Service, e.User)
-	if err != nil || token == "" {
+	switch {
+	case err == nil && token == "", errors.Is(err, ErrNoToken):
 		return r.with(Fail, fmt.Sprintf("no access token in the keyring (service %s, user %s)", e.Service, e.User),
 			fmt.Sprintf("chezmoi secret keyring set --service=%s --user=%s", e.Service, e.User))
+	case err != nil:
+		return r.with(Fail, "keyring read failed: "+firstLine(err.Error()),
+			fmt.Sprintf("check that chezmoi can read the OS keyring: chezmoi secret keyring get --service=%s --user=%s", e.Service, e.User))
 	}
 	c := p.run(ctx, []string{bin, keyProject, "get", project, "--output", "none", "--color", "no"},
 		[]string{"BWS_ACCESS_TOKEN=" + token}, false)

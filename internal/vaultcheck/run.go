@@ -68,9 +68,12 @@ func (x Exec) Run(ctx context.Context, data map[string]any, name string, args []
 		return fmt.Errorf("%s not found: install %s or set command in .chezmoidata/secrets.toml", cli, e.Kind)
 	}
 	token, err := x.Keyring.Get(ctx, e.Service, e.User)
-	if err != nil || token == "" {
+	switch {
+	case err == nil && token == "", errors.Is(err, ErrNoToken):
 		return fmt.Errorf("no access token in the keyring (service %s, user %s): chezmoi secret keyring set --service=%s --user=%s",
 			e.Service, e.User, e.Service, e.User)
+	case err != nil:
+		return fmt.Errorf("read the access token (service %s, user %s): %w", e.Service, e.User, err)
 	}
 	redact := func(s string) string { return strings.ReplaceAll(s, token, "[redacted]") }
 
