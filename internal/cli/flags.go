@@ -18,7 +18,7 @@ func newFlags(name string) *flag.FlagSet {
 		fs.Bool("fetch", false, "git fetch the dotfiles first")
 		fs.Bool("check", false, "exit non-zero when the dotfiles are not in sync")
 	case cmdView:
-		fs.String("as", "", "render one `os[,role]` (darwin|linux|windows; personal|work|light)")
+		fs.String("as", "", "render one `os[,profile]` (darwin|linux|windows; a declared profile)")
 		fs.Bool("matrix", false, "render every configuration")
 	case cmdPkgState:
 		fs.Bool("offline", false, "skip upstream lookups (releases, uv, npm) and the git fetch")
