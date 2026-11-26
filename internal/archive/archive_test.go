@@ -481,9 +481,8 @@ func TestListZipCountsTheHeadersTheReaderReads(t *testing.T) {
 	binary.LittleEndian.PutUint16(short64[30:], 4)
 	short64 = append(short64, 0x01, 0x00, 0x00, 0x00) // zip64 extra field, no data
 	tests := []struct {
-		name  string
-		xfail string
-		data  []byte
+		name string
+		data []byte
 	}{
 		{name: "an understated entry count", data: rawZip(nil, over, 1, 46)},
 		// The directory starts after the prefix, where the declared size puts it
@@ -498,9 +497,6 @@ func TestListZipCountsTheHeadersTheReaderReads(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.xfail != "" {
-				t.Skip("xfail: " + tt.xfail)
-			}
 			if _, err := archive.List(archive.Zip, bytes.NewReader(tt.data)); !errors.Is(err, archive.ErrTooManyEntries) {
 				t.Errorf("List = %v, want %v", err, archive.ErrTooManyEntries)
 			}
