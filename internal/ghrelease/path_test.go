@@ -230,11 +230,8 @@ func TestProposePathRendersToTheListedFile(t *testing.T) {
 
 func TestProposePathLeavesNoOtherTargetInThePath(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: one listed goreleaser target does not settle a path for the others", func(t *testing.T) {
+	t.Run("one listed goreleaser target does not settle a path for the others", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: with one listed target the version and platform directory, which {target} cannot " +
-			"stand for, is kept literally and found, so the unlisted targets get linux_amd64 in their path; " +
-			"docs/cli.md says such a directory is not settled")
 		p := Proposal{Version: "1.2.3", Targets: map[string]string{
 			"linux/amd64": "linux_amd64.tar.gz", "darwin/arm64": "darwin_arm64.tar.xz", // .tar.xz is not listed
 		}}

@@ -24,7 +24,9 @@ const pathSeparators = osSeparator + "/"
 // is unknown counts as executable. ok is true when at least one target has a listing,
 // each listed target has exactly one candidate, and the candidates are the same path
 // once the release version and the target's value are replaced by {version} and
-// {target} where they are whole tokens. The returned path never ends in ".exe".
+// {target} where they are whole tokens, and no OS or arch token is left in it (it
+// would be wrong for the other targets, listed or not). The returned path never ends
+// in ".exe".
 //
 // candidates is for reporting when ok is false: for every listed target the files
 // that match a name, or, when none do, up to five of its executable files.
@@ -63,9 +65,24 @@ func ProposePath(names []string, p Proposal, files map[string][]archive.File) (f
 		return "", false, candidates
 	}
 	for t := range templated {
+		if platformSpecific(t) {
+			// An OS or arch left in the path would be wrong for every other target.
+			return "", false, candidates
+		}
 		return t, true, candidates
 	}
 	return "", false, candidates
+}
+
+// platformSpecific reports whether a templated path still names an OS or an arch,
+// which {target} did not stand for.
+func platformSpecific(s string) bool {
+	if strings.Contains(strings.ToLower(s), x8664) {
+		return true
+	}
+	return slices.ContainsFunc(strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return strings.ContainsRune(pathSeparators, r)
+	}), func(tok string) bool { return osOf(tok) != "" || archOf(tok) != "" || isOtherArch(tok) })
 }
 
 func matchesName(base string, names []string, windows bool) bool {
