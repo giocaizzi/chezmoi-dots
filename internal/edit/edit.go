@@ -238,7 +238,8 @@ func (s *Service) editSource(ctx context.Context, e *registry.Entry, file string
 	defer os.RemoveAll(scratch)
 	entries, err := s.Matrix(ctx, scratch)
 	if err != nil {
-		return fmt.Errorf("build the configuration matrix: %w", err)
+		fmt.Fprintf(s.Err, "%s! matrix unavailable, skipping the per-configuration check: %v%s\n", s.Style.Y, err, s.Style.O)
+		entries = nil
 	}
 	before := s.snapshot(ctx, entries)
 
@@ -441,6 +442,9 @@ func (s *Service) reportSourceChanges(ctx context.Context, wt string) {
 // earlier configuration with the same list) and returns false when a configuration
 // that rendered before no longer renders. One that already failed is only reported.
 func (s *Service) report(entries []matrix.Entry, before, after snapshot) bool {
+	if len(entries) == 0 {
+		return true
+	}
 	st := s.Style
 	fmt.Fprintf(s.Err, "%s▸ changed by this edit%s %s(per configuration)%s\n", st.B, st.O, st.D, st.O)
 	ok := true

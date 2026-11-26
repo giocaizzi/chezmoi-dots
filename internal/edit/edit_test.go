@@ -238,6 +238,23 @@ func TestEditAppliesOnConfirm(t *testing.T) {
 	}
 }
 
+func TestEditOpensEditorWhenMatrixFails(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "a.md"}, st("1"), st("2"))
+	r.svc.Matrix = func(context.Context, string) ([]matrix.Entry, error) {
+		return nil, errors.New("the matrix declaration is invalid")
+	}
+	if err := r.svc.Run(t.Context(), "a"); err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(r.src, "a.md")); string(b) != "new" {
+		t.Errorf("source = %q, want the edit", b)
+	}
+	if got := r.errw.String(); !strings.Contains(got, "matrix unavailable") || strings.Contains(got, "changed by this edit") {
+		t.Errorf("stderr = %q, want the matrix warning and no per-configuration report", got)
+	}
+}
+
 func TestEditDeclinedAppliesNothing(t *testing.T) {
 	t.Parallel()
 	r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "a.md"}, st("1"), st("2"))
