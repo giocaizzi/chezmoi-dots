@@ -71,8 +71,8 @@ The old names were removed without aliases.
 | --- | --- |
 | `outdated` | `pkg status` |
 | `bump` | `pkg bump` |
-| `audit aliases` | `audit` (or `audit aliases`) |
+| `audit aliases` | `audit aliases` (unchanged; plain `audit` also runs `secrets`) |
 | `view --all` | `view --matrix` |
 | `upgrade` release-check footer | `pkg status` |
 
-**Last verified:** not yet verified against a release; written for the CLI redesign.
+**Last verified:** 2026-11-26 by Claude in a sandbox source (scratch HOME and XDG dirs, explicit config and source) against a local 0.4.0 build: `status`, `status --check`, `add`, `upgrade --dry-run`, `pkg status --offline`, `pkg add --dry-run` and `lint`. `pkg bump` was not run (it needs the network).
