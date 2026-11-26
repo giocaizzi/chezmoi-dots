@@ -7,8 +7,11 @@ in chezmoi data under `matrix`. `chezmoi dots view --matrix`, `view --as` and
 previews.
 
 Without a declaration (or without profile tables) there is a single profile,
-`default`, which uses the template's own defaults plus any seed answers. The
-tool sets no keys of its own in the data.
+`default`, which uses the template's own defaults plus any seed answers.
+
+The one key the tool adds itself: every render it runs gets `dotsRender = true`
+in its data, so templates can recognise a `dots` preview or lint render (for
+example to skip externals or network calls).
 
 ## Profiles
 
@@ -23,24 +26,29 @@ any other profile name (the whole name otherwise), first letter upper-cased:
 
 ## How a configuration's data is produced
 
-For each (OS, profile), `dots` renders the source's `.chezmoi.toml.tmpl` with
-`chezmoi execute-template --init --no-tty`, with `.chezmoi.os` set to that OS,
-against a scratch config. Its `[data]` holds only the seed answers and the
-profile's answers (profile overrides seed). The `[data]` table of the rendered
-config becomes that configuration's data.
+Each configuration is rendered against its own config file: the source's config
+template rendered for that (OS, profile), never this machine's config. The
+template is `.chezmoi.toml.tmpl`, `.chezmoi.yaml.tmpl` or `.chezmoi.json.tmpl`
+(first found, in that order), rendered with `chezmoi execute-template --init
+--no-tty` against a scratch config whose data holds only the seed answers and
+the profile's answers (profile overrides seed). Only `.chezmoi.os` (and a
+variant's `set`) is passed on top. Nothing from this machine's config `[data]`
+reaches a configuration, and `.chezmoidata` values apply exactly as after
+`chezmoi init` with those answers. Without a config template, a configuration's
+config data is just the declared answers.
+
+Only `.chezmoi.os` is overridden. `.chezmoi.arch`, `homeDir`, `hostname`,
+`osRelease`, `kernel`, path separators and the rest stay this host's (a windows
+render on macOS sees a POSIX `homeDir`).
 
 A `prompt*Once` without a declared answer returns its default when it has one.
 Without a default, `promptStringOnce` and `promptChoiceOnce` return the prompt
 text itself (so a choice matches no branch), `promptMultichoiceOnce` returns a
 one-item list holding the prompt text, `promptBoolOnce` returns `false` and
 `promptIntOnce` returns `0`. Avoid this by declaring the key in `[matrix.seed]`
-(or a profile table), or by giving the prompt a default.
-
-Configuration data is only the rendered `[data]`. A key that only some
-configurations render is set to its zero value (`false`, `""`, empty list) for
-the others, and so is a key in this machine's config `[data]` that no
-configuration renders, so nothing from this machine's config reaches any
-configuration.
+(or a profile table), or by giving the prompt a default. Integers and nested
+(dotted or table) keys cannot be declared, so a `promptIntOnce` or a prompt on a
+nested key always takes its default or fallback.
 
 Coverage note: features whose prompt defaults to off stay off in every
 configuration unless declared, so templates guarded by them are not exercised.
@@ -70,7 +78,7 @@ set = { tools = ["alpha"] }    # data overrides on top of the profile's rendered
 
 Rules:
 
-- Values are strings, booleans or lists of strings.
+- Values are strings, booleans or lists of strings (no integers, no nested keys).
 - `chezmoi` is reserved and rejected in `seed`, `profile` and `set`.
 - Keys must be bare TOML keys: letters, digits, `_` and `-`.
 - A variant's `name` must be a non-empty string and unique.
@@ -94,6 +102,12 @@ or an `if`) is then skipped in every render. Stripping tools from `PATH` does no
 help for templates that call a tool by absolute path, so the declaration is the
 mechanism.
 
+`lint templates` skips templates whose own actions, or partials reached via
+`template`/`includeTemplate` (in `.chezmoitemplates`), call a password-manager,
+secret or decrypt function. It does not skip `output`/`outputList` (any
+command) or the `gitHub*` network functions: gate those on a declared answer or
+on `dotsRender`.
+
 ## Template linting
 
 `lint templates` renders every template whose target is a shell (`.sh`, `.bash`),
@@ -104,7 +118,8 @@ A template is rendered only in the configurations where chezmoi manages it, so
 encrypted, symlink and modify entries, and any template whose actions call a
 password-manager, secret or decrypt function. Linters: shellcheck (bash dialect
 when there is no shebang), `zsh -n`, the PowerShell parser and JSON validity; a
-missing linter is skipped.
+missing linter is skipped. One `chezmoi managed` failure is a finding for that
+configuration; the others still run.
 
 ## Validation
 
@@ -114,6 +129,9 @@ profile names, reserved keys, value types, a missing or duplicate variant name,
 declaration is invalid (chezmoi dots lint matrix)" when it is invalid. `edit` is
 the exception: it warns, skips the per-configuration check and still opens the
 editor, so the declaration can be repaired.
+
+Package and alias registry `roles` and `machines` are validated against the
+declared profiles (any non-empty name when none are declared).
 
 ## Migrating
 
