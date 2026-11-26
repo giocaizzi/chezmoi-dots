@@ -442,7 +442,7 @@ func (s *Service) reportSourceChanges(ctx context.Context, wt string) {
 // that rendered before no longer renders. One that already failed is only reported.
 func (s *Service) report(entries []matrix.Entry, before, after snapshot) bool {
 	st := s.Style
-	fmt.Fprintf(s.Err, "%s▸ changed by this edit%s %s(per configuration, every harness selected)%s\n", st.B, st.O, st.D, st.O)
+	fmt.Fprintf(s.Err, "%s▸ changed by this edit%s %s(per configuration)%s\n", st.B, st.O, st.D, st.O)
 	ok := true
 	changed := make([]string, len(entries))
 	row := func(label, text string) { fmt.Fprintf(s.Err, "  %s%-17s%s %s\n", st.M, label, st.O, text) }

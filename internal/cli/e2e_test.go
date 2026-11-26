@@ -24,17 +24,16 @@ const configTemplate = `{{- $roles := dict -}}
 {{- $light := eq (promptChoiceOnce $roles "light" "Light?" (list "yes" "no") (get $roles "light" | default "no")) "yes" -}}
 {{- $work := eq (promptChoiceOnce $roles "work" "Work?" (list "yes" "no") (get $roles "work" | default "no")) "yes" -}}
 {{- $user := promptStringOnce . "gitUser" "Name" "" -}}
-{{- $harnesses := list -}}
-{{- if not $light }}
-{{- $all := list "claude" "vscode" -}}
-{{- $harnesses = promptMultichoiceOnce . "harnesses" "Harnesses" $all (get . "harnesses" | default list) -}}
-{{- end }}
+{{- $tools := list -}}
+{{- if not $light }}{{- $tools = promptMultichoiceOnce . "tools" "Tools" (list "alpha" "beta") (get . "tools" | default list) -}}{{- end }}
+{{- $featureX := promptBoolOnce . "featureX" "Feature X?" false -}}
 [data]
     gitUser = {{ $user | quote }}
     light = {{ $light }}
     work = {{ $work }}
+    featureX = {{ $featureX }}
 {{- if not $light }}
-    harnesses = {{ $harnesses | toJson }}
+    tools = {{ $tools | toJson }}
 {{- end }}
 `
 
@@ -73,7 +72,7 @@ func newEnv(t *testing.T) *env {
 	write(filepath.Join(e.src, ".chezmoidata", "edit.toml"), registry)
 	write(filepath.Join(e.src, "dot_note.tmpl"), "hello {{ if get . \"work\" }}work{{ else }}home{{ end }}\n")
 	cfg := filepath.Join(root, "chezmoi.toml")
-	write(cfg, "destDir = "+quote(e.dest)+"\npersistentState = "+quote(filepath.Join(root, "state.boltdb"))+"\n[data]\n    work = false\n    light = false\n    harnesses = []\n")
+	write(cfg, "destDir = "+quote(e.dest)+"\npersistentState = "+quote(filepath.Join(root, "state.boltdb"))+"\n[data]\n    work = false\n    light = false\n    tools = []\n")
 	if err := os.MkdirAll(e.dest, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -305,16 +304,56 @@ func TestLintRegistryOnTheFixture(t *testing.T) {
 	}
 }
 
-// A config template that offers no `$all := list` harness list is a repo without
-// harness choices: the matrix still builds and the templates lint runs.
-func TestLintTemplatesWithoutAHarnessList(t *testing.T) {
+// The matrix declaration is optional: without one the matrix builds from the defaults.
+func TestLintWithoutAMatrixDeclaration(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	tmpl := strings.Replace(configTemplate, `{{- $all := list "claude" "vscode" -}}`, `{{- $all := list -}}`, 1)
-	if err := os.WriteFile(filepath.Join(e.src, ".chezmoi.toml.tmpl"), []byte(tmpl), 0o644); err != nil {
+	if _, stderr, err := e.run(t, "", "lint", "matrix", "templates"); err != nil {
+		t.Errorf("lint matrix templates = %v\n%s", err, stderr)
+	}
+}
+
+func (e *env) writeFile(t *testing.T, rel, text string) {
+	t.Helper()
+	path := filepath.Join(e.src, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if _, stderr, err := e.run(t, "", "lint", "templates"); err != nil {
-		t.Errorf("lint templates = %v\n%s", err, stderr)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLintMatrixUnknownRole(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", "[matrix.role.boss]\nfeatureX = true\n")
+	_, stderr, err := e.run(t, "", "lint", "matrix")
+	if err == nil || !strings.Contains(stderr, "matrix.role.boss") || !strings.Contains(stderr, "unknown role") {
+		t.Errorf("lint matrix = %v, stderr %q, want a finding naming the unknown role", err, stderr)
+	}
+}
+
+// A role answer is seeded into the config template, so a script gated on it breaks
+// only for that role.
+func TestLintTemplatesSeedsRoleAnswers(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", "[matrix.role.work]\nfeatureX = true\n")
+	e.writeFile(t, ".chezmoiscripts/probe.json.tmpl", "{{ if .featureX }}{ broken{{ end }}")
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "(darwin/work)") || strings.Contains(stderr, "/personal)") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the work role only", err, stderr)
+	}
+}
+
+func TestLintTemplatesVariant(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.writeFile(t, ".chezmoidata/matrix.toml", "[[matrix.variant]]\nname = \"one tool\"\nroles = [\"work\"]\nset = { tools = [\"alpha\"] }\n")
+	e.writeFile(t, ".chezmoiscripts/probe.json.tmpl", `{{ if has "alpha" (get . "tools" | default list) }}{ broken{{ end }}`)
+	_, stderr, err := e.run(t, "", "lint", "templates")
+	if err == nil || !strings.Contains(stderr, "(darwin/work [one tool])") || strings.Contains(stderr, "/personal") || strings.Contains(stderr, "(darwin/work)") {
+		t.Errorf("lint templates = %v, stderr %q, want findings for the work variant only", err, stderr)
 	}
 }

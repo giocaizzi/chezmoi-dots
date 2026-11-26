@@ -129,3 +129,31 @@ func TestStateAndChanged(t *testing.T) {
 		t.Error("DecodeState(garbage): want an error")
 	}
 }
+
+func TestConfigData(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, stdout string
+		want         map[string]any
+	}{
+		{"data", `{"destDir":"/d","data":{"Tools":["a"],"work":true}}`, map[string]any{"Tools": []any{"a"}, "work": true}},
+		{"no data", `{"destDir":"/d"}`, map[string]any{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			r := &fakeRunner{stdout: tt.stdout}
+			got, err := New(r, "chezmoi", "--config", "/c").ConfigData(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if diff := cmp.Diff(tt.want, got); diff != "" {
+				t.Errorf("ConfigData() (-want +got):\n%s", diff)
+			}
+			want := []string{"chezmoi", "--config", "/c", "dump-config", "--format", "json"}
+			if diff := cmp.Diff(want, r.calls[0]); diff != "" {
+				t.Errorf("argv (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
