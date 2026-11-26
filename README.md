@@ -87,6 +87,7 @@ go install github.com/giocaizzi/chezmoi-dots/cmd/chezmoi-dots@latest
 | `dots pkg status` | none | Survey installed packages against pins and upstream releases |
 | `dots pkg bump` | `[<pin>...]` | Fetch latest releases and archive commits, and update the pins in the registry and externals files |
 | `dots pkg add` | `<name>` | Add a package or pinned release to `packages.toml` |
+| `dots secrets run` | `<name> [--] <args...>` | Run a declared [secret-manager CLI](docs/secrets.md#running-a-cli-with-its-token-secrets-run) with its token injected |
 | `dots version` | none | Print the binary version |
 | `dots help` | `[<command> [<subcommand>]]` | Show root or local help |
 

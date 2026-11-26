@@ -16,10 +16,11 @@ Examples below use `chezmoi dots`; `dots` also works if you define that alias.
 | `lint` | `[<check>...]` | Validate registries and templates |
 | `audit` | `[<check>...]` | Audit live shell aliases and secret-manager configuration against the registries |
 | `pkg` | `status`, `bump`, `add` | Survey and update pinned packages, releases and archive externals, and add packages and releases |
+| `secrets` | `run` | Run a declared secret-manager CLI with its token |
 | `version` | none | Print the binary version |
 | `help` | `[<command> [<subcommand>]]` | Show root or local help |
 
-Only `pkg` has subcommands (`status`, `bump`, `add`). Lint checks, audit checks, pin
+Only `pkg` (`status`, `bump`, `add`) and `secrets` (`run`) have subcommands. Lint checks, audit checks, pin
 names and upgrade steps are arguments, not subcommands. The internal `live`
 command is [documented separately](#internal-live-command) and omitted from the
 root index. There is no `tree` command and `list` does not accept a pattern.
@@ -526,6 +527,40 @@ chezmoi dots pkg add example-tool --release --version 1.2.3 \
   --url 'https://example.com/{version}/tool-{target}.tar.gz' \
   --target linux/amd64=linux-x86_64 --target darwin/arm64=macos-arm --dry-run
 chezmoi dots pkg add example-tool --github octocat/example-tool --dry-run
+```
+
+## secrets run
+
+```text
+chezmoi dots secrets run <name> [--timeout <duration>] [--] [<args>...]
+```
+
+Run the CLI of the `bws` entry `<name>` declared in `.chezmoidata/secrets.toml`,
+with its access token from the keyring set as `BWS_ACCESS_TOKEN` in the child's
+environment. `secrets` alone or `secrets -h` shows the group help; an unknown
+subcommand is a usage error (exit 2) listing `run`.
+
+The arguments are split at the first literal `--` before options are parsed.
+Before it: `--timeout`, `-h`, `--help` and the positionals `<name>`. After it:
+passed to the CLI verbatim and never parsed, so `-h` or `--output` reach the CLI.
+An unknown option before `--` is a usage error that adds
+`put the CLI's arguments after --`. `--timeout` is a Go duration; the default `0`
+means no timeout and a negative value is a usage error (on expiry:
+`bws timed out after <duration>`, exit 1).
+
+A missing name (`secrets run needs a name`), a name that is not declared, and a
+`bw` or `rbw` entry (no token injection; use the CLI's own session) are usage
+errors (exit 2). A failing CLI exits with its own exit code, printing nothing
+more; an invalid registry, a missing CLI, a missing token or a timeout exit 1.
+The CLI is the entry's `command` or `bws` on `PATH`; nothing else overrides it,
+and no shell is used. The CLI's output is not filtered. Environment: shared
+chezmoi settings; the child inherits the environment. See
+[secrets](secrets.md#running-a-cli-with-its-token-secrets-run) and
+[using it from a template](secrets.md#using-it-from-a-template).
+
+```sh
+chezmoi dots secrets run example-vault -- project list
+chezmoi dots secrets run example-vault -- secret list 00000000-0000-0000-0000-000000000000 --output json --color no
 ```
 
 ## version

@@ -1,4 +1,4 @@
-# Secrets registry and `audit secrets`
+# Secrets registry, `audit secrets` and `secrets run`
 
 `.chezmoidata/secrets.toml` declares which secret managers your templates read
 from. `chezmoi dots lint secrets` validates the declaration and
@@ -103,6 +103,72 @@ rbw              rbw   fail   rbw not found
 
 This run exits 1 because of the `fail`.
 
+## Running a CLI with its token: secrets run
+
+```text
+chezmoi dots secrets run <name> [--timeout <duration>] [--] [<args>...]
+```
+
+Runs the CLI of the declared entry `<name>` with its access token in the
+environment, so a template or a script can call it without handling the token.
+It works for `bws` entries only: `bw` and `rbw` have no token to inject, so
+`secrets run` on them is a usage error (exit 2); use the CLI's own session
+(`BW_SESSION`, the `rbw` agent).
+
+- The arguments are split at the first literal `--`. What comes before is parsed
+  by `secrets run` (`--timeout`, `-h`, `--help`, the name); everything after is
+  passed to the CLI verbatim and never parsed, so `-h` or `--output` after `--`
+  reach `bws`. An unknown option before `--` is a usage error that adds
+  `put the CLI's arguments after --`. chezmoi passes plugin arguments verbatim,
+  including `--`, `--output` and `--color`, so
+  `chezmoi dots secrets run example-vault -- secret list <project-id> --output json --color no`
+  reaches `bws` unchanged.
+- The CLI is resolved like the audit does: the entry's `command` (a leading `~/`
+  expands to the home directory) or `bws` on `PATH`. The token is read from the
+  entry's keyring (`chezmoi secret keyring get`) and set as `BWS_ACCESS_TOKEN` in
+  the child's environment only.
+- `--timeout <duration>` is a Go duration (`30s`, `2m`); the default `0` means no
+  timeout. A negative value is a usage error. On expiry it fails with
+  `bws timed out after <duration>`.
+- The CLI's output goes straight to stdout and stderr, and stdin is passed through.
+
+Exit codes: the CLI's own exit code when it fails; 2 for a usage error (no name,
+unknown subcommand, a name that is not declared, a `bw` or `rbw` entry, an
+unknown option before `--`); 1 for everything else (invalid registry, CLI not
+found, no token in the keyring, timeout).
+
+```sh
+chezmoi dots secrets run example-vault -- project list
+chezmoi dots secrets run example-vault --timeout 30s -- secret list 00000000-0000-0000-0000-000000000000 --output json --color no
+```
+
+## Using it from a template
+
+The same template works on every OS: no `sh` or PowerShell branches and no shell
+quoting, because the arguments are passed to the command one by one.
+
+```text
+{{- if lookPath "chezmoi-dots" }}
+{{-   $json := output "chezmoi" "dots" "secrets" "run" "example-vault" "--" "secret" "list" .secretsProjectId "--output" "json" "--color" "no" }}
+{{-   range (fromJson $json) }}
+export {{ .key }}={{ .value | quote }}
+{{-   end }}
+{{- end }}
+```
+
+- chezmoi's [`lookPath`](https://www.chezmoi.io/reference/templates/functions/lookPath/)
+  returns an empty string when the executable is not on `PATH`, and
+  [`output`](https://www.chezmoi.io/reference/templates/functions/output/) fails
+  the whole template if the command exits non-zero, and runs on every render.
+- When the answer may be empty (`projectFrom`), gate on it too, for example
+  `{{- if and (lookPath "chezmoi-dots") .secretsProjectId }}`.
+- Bootstrap: on a new machine the first `chezmoi apply` has no `chezmoi-dots`
+  yet, because templates render before externals are fetched. The `lookPath`
+  gate makes that render skip the block. Install `chezmoi-dots` as a chezmoi
+  external (see [Installation](../README.md#installation)) and run
+  `chezmoi apply` a second time. Alternatively, list the file in
+  `.chezmoiignore` (itself a template) until the binary exists.
+
 ## Relation to chezmoi
 
 The registry declares what your templates read; the audit only probes. It never
@@ -128,5 +194,18 @@ reads or wraps secret values and does not replace chezmoi's own functions.
   only through the `BWS_ACCESS_TOKEN` environment variable, never as an
   argument (chezmoi's docs advise against tokens on command lines). `bws` runs
   with `--output none`, so no output is produced.
-- Every CLI call has a 15 second timeout. Being offline gives `warn`
+- `secrets run` executes only a CLI declared in the registry, at its declared
+  `command` or on `PATH`, and refuses names that are not declared. No flag or
+  environment variable overrides the command, and no shell is ever involved.
+- The token goes only into the child's environment (`BWS_ACCESS_TOKEN`): never
+  into an argument, never into our stdout or stderr, and it is replaced by
+  `[redacted]` in our own error messages. The child inherits the rest of the
+  environment.
+- `secrets run` does not filter what the CLI prints. Whatever `bws` writes, for
+  example secret values from `secret list`, goes to stdout; that is the point
+  for templates. It is not a general secret reader and adds no access the token
+  does not already grant.
+- Anyone who can edit the registry's `command` can make it hand the token to
+  another program; this is the same trust as the dotfiles source itself.
+- Every audit CLI call has a 15 second timeout. Being offline gives `warn`
   (`unreachable`), not `fail`.
