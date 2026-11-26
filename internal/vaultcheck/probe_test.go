@@ -3,6 +3,7 @@ package vaultcheck_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -158,9 +159,9 @@ func TestCheck(t *testing.T) {
 			argv: []string{"/fake/bws", "project", "get", "proj-1", "--output", "none", "--color", "no"},
 		},
 		{
-			name: "command override with home", entry: vaultcheck.Entry{Name: "x", Kind: "rbw", Command: "~/bin/rbw"}, have: []string{"/home/octocat/bin/rbw"},
+			name: "command override with home", entry: vaultcheck.Entry{Name: "x", Kind: "rbw", Command: "~/bin/rbw"}, have: []string{filepath.Join("/home/octocat", "bin", "rbw")},
 			want: vaultcheck.Result{Name: "x", Kind: "rbw", State: vaultcheck.OK, Detail: "agent unlocked"},
-			argv: []string{"/fake//home/octocat/bin/rbw", "unlocked"},
+			argv: []string{"/fake/" + filepath.Join("/home/octocat", "bin", "rbw"), "unlocked"},
 		},
 		{
 			name: "bw unlocked", entry: vaultcheck.Entry{Name: "pw", Kind: "bw"}, have: []string{"bw"},
