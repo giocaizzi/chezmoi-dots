@@ -14,10 +14,10 @@ import (
 )
 
 func entriesFor(profiles ...string) []matrix.Entry {
-	var out []matrix.Entry
+	out := make([]matrix.Entry, 0, len(profiles)*len(matrix.OSes()))
 	for _, o := range matrix.OSes() {
 		for _, p := range profiles {
-			out = append(out, matrix.Entry{Config: matrix.Config{OS: o, Profile: p}})
+			out = append(out, matrix.Entry{OS: o, Profile: p})
 		}
 	}
 	return out

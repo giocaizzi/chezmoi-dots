@@ -206,7 +206,7 @@ func newRig(t *testing.T, e registry.Entry, states ...chez.State) *rig {
 	r.svc = &Service{
 		CZ: r.cz, Registry: reg,
 		Matrix: func(context.Context, string) ([]matrix.Entry, error) {
-			return []matrix.Entry{{Config: matrix.Config{OS: "linux", Profile: "home"}, Overrides: chez.Overrides{"featureX": true}}}, nil
+			return []matrix.Entry{{OS: "linux", Profile: "home", Overrides: chez.Overrides{"featureX": true}}}, nil
 		},
 		Tree: tree.New(fstest.MapFS{}), Editor: r.ed, Check: r.chk, Prompt: r.pr, Git: r.git, Src: src,
 		Out: io.Discard, Err: r.errw, Style: term.Style{},

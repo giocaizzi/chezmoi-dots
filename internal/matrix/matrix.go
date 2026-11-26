@@ -148,7 +148,7 @@ func (s Spec) Profiles() []string {
 
 // Configs returns every OS and profile, OS-major.
 func (s Spec) Configs() []Config {
-	var out []Config
+	out := make([]Config, 0, len(OSes())*len(s.Profiles()))
 	for _, o := range OSes() {
 		for _, p := range s.Profiles() {
 			out = append(out, Config{OS: o, Profile: p})

@@ -318,7 +318,7 @@ func (s *Service) viewTarget(ctx context.Context, target string, mode ViewMode, 
 	return nil
 }
 
-func (s *Service) renderTargetMatrix(groups []*renderGroup, missing []string, profiles []string) {
+func (s *Service) renderTargetMatrix(groups []*renderGroup, missing, profiles []string) {
 	st := s.Style
 	palette := st.Palette()
 	fmt.Fprintf(s.Out, "%s▸ matrix%s\n", st.B, st.O)

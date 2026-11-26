@@ -68,7 +68,7 @@ func TestProfilesAndConfigs(t *testing.T) {
 	if diff := cmp.Diff([]string{"home", "minimal"}, s.Profiles()); diff != "" {
 		t.Errorf("Profiles() (-want +got):\n%s", diff)
 	}
-	var labels []string
+	labels := make([]string, 0, len(s.Configs()))
 	for _, c := range s.Configs() {
 		labels = append(labels, c.Label())
 	}
