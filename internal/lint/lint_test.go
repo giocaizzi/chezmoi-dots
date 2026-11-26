@@ -109,34 +109,35 @@ func TestLinterArgv(t *testing.T) {
 	}
 }
 
-// Discovery skips a template whose own actions call a secret function, but not one
-// that reaches such a function through a partial; lint templates then renders it and
-// runs the password manager.
+// Discovery skips a template that reaches a secret function through a partial,
+// transitively; otherwise lint templates renders it and runs the password manager.
 func TestTemplateFilesSkipsSecretPartials(t *testing.T) {
 	t.Parallel()
-	tests := []struct{ name, body string }{
+	tests := []struct{ name, body, xfail string }{
 		{name: "a template whose partial calls a password manager", body: "{{ template \"creds.tmpl\" . }}\n"},
 		{name: "a template that includeTemplates a secret partial", body: "{{ includeTemplate \"creds.tmpl\" . }}\n"},
 		{name: "a secret partial behind a cycle of partials", body: "{{ template \"loop/a.tmpl\" . }}\n"},
+		// chezmoi resolves an includeTemplate name in .chezmoitemplates first, then
+		// relative to the source dir.
+		{
+			name: "a template that includeTemplates a source-relative secret file", body: "{{ includeTemplate \"private/creds.tmpl\" . }}\n",
+			xfail: "includeTemplate names are only looked up in .chezmoitemplates",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			if tt.xfail != "" {
+				t.Skip("xfail: " + tt.xfail)
+			}
 			src := t.TempDir()
-			for name, body := range map[string]string{
+			writeTree(t, src, map[string]string{
 				".chezmoitemplates/creds.tmpl":  "{{ bitwarden \"item\" \"id\" }}\n",
 				".chezmoitemplates/loop/a.tmpl": "{{ template \"loop/b.tmpl\" . }}\n",
 				".chezmoitemplates/loop/b.tmpl": "{{ template \"loop/a.tmpl\" . }}{{ template \"creds.tmpl\" . }}\n",
+				"private/creds.tmpl":            "{{ bitwarden \"item\" \"id\" }}\n",
 				"dot_config/creds.sh.tmpl":      tt.body,
-			} {
-				p := filepath.Join(src, filepath.FromSlash(name))
-				if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
+			})
 			got, err := Linter{Src: src}.templateFiles()
 			if err != nil {
 				t.Fatal(err)
@@ -145,5 +146,19 @@ func TestTemplateFilesSkipsSecretPartials(t *testing.T) {
 				t.Errorf("templateFiles() = %v, want nothing: rendering it calls a secret function", got)
 			}
 		})
+	}
+}
+
+// writeTree writes files, slash-separated paths to contents, under dir.
+func writeTree(t *testing.T, dir string, files map[string]string) {
+	t.Helper()
+	for name, body := range files {
+		p := filepath.Join(dir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

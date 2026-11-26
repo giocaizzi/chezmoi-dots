@@ -50,6 +50,9 @@ type env struct {
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	if _, err := exec.LookPath("chezmoi"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("chezmoi is not on PATH: CI installs it so these tests never skip there")
+		}
 		t.Skip("chezmoi is not installed")
 	}
 	root := t.TempDir()
@@ -464,7 +467,7 @@ func TestMatrixReview(t *testing.T) {
 func TestConfigTemplateFormats(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name, file, text, probe, want, notWant string
+		name, file, text, probe, want, notWant, xfail string
 	}{
 		{
 			name: "yaml", file: ".chezmoi.yaml.tmpl",
@@ -479,6 +482,13 @@ func TestConfigTemplateFormats(t *testing.T) {
 			want:  "(windows/default)", notWant: "(linux/",
 		},
 		{
+			name: "jsonc", file: ".chezmoi.jsonc.tmpl",
+			text:  "{\"data\": {\"fromTemplate\": \"jsonc-{{ .chezmoi.os }}\"} // chezmoi accepts JSONC\n}\n",
+			probe: `{{ if eq (get . "fromTemplate" | default "") "jsonc-linux" }}{ broken{{ end }}`,
+			want:  "(linux/default)", notWant: "(darwin/",
+			xfail: ".chezmoi.jsonc.tmpl is not read, so the source is treated as having no config template",
+		},
+		{
 			name: "none", probe: `{{ if get . "featureX" }}{ broken{{ end }}`,
 			want: "(darwin/home)", notWant: "/minimal)",
 		},
@@ -486,6 +496,9 @@ func TestConfigTemplateFormats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			if tt.xfail != "" {
+				t.Skip("xfail: " + tt.xfail)
+			}
 			e := newEnv(t)
 			if tt.name == "none" {
 				e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
@@ -532,4 +545,64 @@ func (e *env) appendConfig(t *testing.T, text string) {
 	if err = os.WriteFile(cfg, append(b, text...), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Standalone chezmoi-dots gets no CHEZMOI_SOURCE_DIR: the source dir comes from this
+// machine's config (sourceDir). A per-configuration config replaces that config, so a
+// render that does not also name the source reads chezmoi's default source dir.
+// Not parallel: t.Setenv points HOME and the XDG dirs of the chezmoi subprocesses at a
+// temp dir holding a decoy default source, so no real source is ever read.
+func TestStandaloneSourceDirReachesConfigurations(t *testing.T) { //nolint:paralleltest // t.Setenv sandboxes the chezmoi subprocesses
+	t.Run("view --as renders the discovered source, not chezmoi's default", func(t *testing.T) {
+		t.Skip("xfail: per-configuration renders pass the rendered --config but no --source")
+		e := newStandaloneEnv(t)
+		out, _, err := e.run(t, "", "view", filepath.Join(e.dest, ".note"), "--as", "linux,home")
+		if err != nil || !strings.Contains(out, "hello feature") || strings.Contains(out, "decoy") {
+			t.Errorf("view --as linux,home = %q, %v, want the discovered source rendered", out, err)
+		}
+	})
+	// Today the decoy's data (no declaration) and managed list are used: a clean run.
+	t.Run("lint templates lints the discovered source, not chezmoi's default", func(t *testing.T) {
+		t.Skip("xfail: lint's isolated client (matrix data, managed lists) passes --config but no --source")
+		e := newStandaloneEnv(t)
+		e.writeFile(t, "dot_probe.json.tmpl", "{ broken")
+		_, stderr, err := e.run(t, "", "lint", "templates")
+		if err == nil || !strings.Contains(stderr, "dot_probe.json.tmpl (darwin/home)") {
+			t.Errorf("lint templates = %v, stderr %q, want the broken template of the discovered source reported", err, stderr)
+		}
+	})
+}
+
+// newStandaloneEnv is newEnv run as standalone chezmoi-dots: no CHEZMOI_SOURCE_DIR, the
+// source dir named only by the machine config, and a decoy at chezmoi's default source
+// dir under a temp HOME.
+func newStandaloneEnv(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t)
+	home := t.TempDir()
+	for _, k := range []string{"HOME", "USERPROFILE"} {
+		t.Setenv(k, home)
+	}
+	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME"} {
+		t.Setenv(k, filepath.Join(home, k))
+	}
+	for _, d := range []string{filepath.Join(home, "XDG_DATA_HOME", "chezmoi"), filepath.Join(home, ".local", "share", "chezmoi")} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, "dot_note.tmpl"), []byte("decoy\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := e.vars["CHEZMOI_CONFIG_FILE"]
+	b, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(cfg, append([]byte("sourceDir = "+quote(e.src)+"\n"), b...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	delete(e.vars, "CHEZMOI_SOURCE_DIR")
+	e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
+	return e
 }

@@ -51,6 +51,9 @@ func TestSelectionTemplateThroughChezmoi(t *testing.T) {
 	t.Parallel()
 	bin, err := exec.LookPath("chezmoi")
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("chezmoi is not on PATH: CI installs it so this test never skips there")
+		}
 		t.Skip("chezmoi is not on PATH")
 	}
 	src, dst := t.TempDir(), t.TempDir()
