@@ -7,6 +7,8 @@ Source of truth for decisions, architecture and runbooks of this repo.
 - [Everyday workflow](workflow.md): daily check, editing, upgrades, pin updates, CI usage and migrating from 0.x command names.
 - [Matrix](matrix.md): OS x declared profiles, how their data is produced and the opt-in `matrix` declaration.
 - [Package registry](registry.md): the `.chezmoidata/packages.toml` schema, the templates `pkg status` renders, and a worked example.
+- [Edit registry](edit-registry.md): `.chezmoidata/edit.toml` keys, lint findings and the coverage rule.
+- [Alias registry](alias-registry.md): the `alias`, `aliasBlock` and `aliasExternal` data, lint findings and what `audit aliases` reads.
 - [Release chezmoi-dots](release.md): runbook for tagging and publishing a version, verifying it, and bumping it in a dotfiles repository.
 - [Build and install locally](local-build-install.md): checks, build, optional installation, verification and rollback.
 

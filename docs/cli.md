@@ -39,7 +39,7 @@ For the daily procedures see the [everyday workflow](workflow.md).
   every argument: a flag value containing `--help` remains a value.
 - Options can precede or follow positional arguments, for example
   `view --matrix git` and `view git --matrix`. Value options accept
-  `--as=linux,work` or `--as linux,work`; booleans default to false and can use
+  `--as=linux,home` or `--as linux,home`; booleans default to false and can use
   `--matrix=true` or `--matrix=false`.
 - Historical `--` behavior is **not** a permanent end-of-options marker. It ends
   the current flag-parser pass; one following positional is consumed and parsing
@@ -60,7 +60,8 @@ Commands using chezmoi honor `CHEZMOI_EXECUTABLE` (default `chezmoi`),
 `CHEZMOI_CONFIG_FILE` (otherwise chezmoi's normal configuration), and
 `CHEZMOI_SOURCE_DIR` (otherwise discovered through chezmoi). An explicitly set
 source directory also honors `.chezmoiroot`. These apply to `edit`, `add`,
-`view`, `list`, `status`, `lint`, `pkg status`, `pkg bump` and `pkg add`; `upgrade` uses
+`view`, `list`, `status`, `lint`, `audit` (its `secrets` check), `secrets run`,
+`pkg status`, `pkg bump` and `pkg add`; `upgrade` uses
 `CHEZMOI_EXECUTABLE` for its dotfiles step. Child tools may use their own environment and configuration.
 
 Help uses blue titles and section headings plus mauve command names. Styled
@@ -79,7 +80,8 @@ chezmoi dots [edit] [<what>]
 it opens the interactive registry picker. A local registry entry can open a
 folder's file picker. Source edits use a temporary copy, validation and preview
 before saving. Apply and Git automation follow the
-[chezmoi edit settings](README.md#apply-and-publish-source-edits).
+[chezmoi edit settings](README.md#apply-and-publish-source-edits). Names, checks
+and notes come from the [edit registry](edit-registry.md).
 
 Options: only `-h`, `--help`. Editor selection is `EDITOR`, then `VISUAL`, then
 `vi` (`notepad` on Windows). `TMUX` with `tmux` available, or `WT_SESSION` with
@@ -114,7 +116,11 @@ created the source file, the registry file is restored. If it failed afterwards
 exits non-zero with chezmoi's error (naming the added file and the kept entry)
 and skips the registry validation; run `chezmoi dots lint registry` afterwards.
 When `chezmoi add` succeeded, `add` validates the whole registry; findings exit 1
-and the entry is kept.
+and the entry is kept. The validation includes the coverage rule of the
+[edit registry](edit-registry.md#coverage): if the source has no entry for
+`.chezmoidata/edit.toml` itself, the first `add` exits 1 with
+`.chezmoidata/edit.toml: no edit registry entry` and keeps the entry; register
+the registry file as shown there.
 
 Registering a file chezmoi already manages, or a `--local` folder, runs no
 `chezmoi add`, so `add` follows the same git settings as `edit`: with
@@ -189,7 +195,9 @@ chezmoi dots list
 chezmoi dots lint [<check>...]
 ```
 
-Checks are `registry`, `aliases`, `packages` (the rules are in the
+Checks are `registry` (the [edit registry](edit-registry.md): entry keys and
+source coverage), `aliases` (the [alias registry](alias-registry.md): `alias`,
+`aliasBlock` and `aliasExternal` data), `packages` (the rules are in the
 [package registry](registry.md)), `secrets` (validates
 [`.chezmoidata/secrets.toml`](secrets.md#lint)), `matrix`, `templates`. With none,
 run all in that order; explicit arguments run in the supplied order. Findings
@@ -275,14 +283,18 @@ chezmoi dots audit [<check>...]
 Like `lint`, checks are arguments. The checks are `aliases` and `secrets`; with no
 argument all checks run in that order, and an unknown check is a usage error
 (exit 2). The `aliases`
-check audits interactive Zsh and Bash aliases against rendered alias files and
-enabled Oh My Zsh plugins. Shells absent from `PATH` are skipped; unmanaged
+check audits interactive Zsh and Bash aliases against the rendered alias files
+(produced by your templates, see the [alias registry](alias-registry.md#audit))
+and enabled Oh My Zsh plugins. Shells absent from `PATH` are skipped; unmanaged
 aliases make the check fail. Options: only `-h`, `--help`.
 
 Environment: `XDG_CONFIG_HOME` (default `~/.config`) locates
 `shell/aliases.sh` and optional `shell/omz-aliases.zsh`. Plugin definitions are
 read under `~/.oh-my-zsh/plugins`. Apply your dotfiles first so rendered aliases
-exist. Interactive shell startup files affect the aliases observed.
+exist: a missing `shell/aliases.sh` fails the check with exit 1 (`read the
+rendered aliases (chezmoi apply?)`), and because that is an error rather than a
+finding, a plain `chezmoi dots audit` stops there and the `secrets` check does
+not run. Interactive shell startup files affect the aliases observed.
 
 The `secrets` check probes, read-only, the secret-manager CLIs declared in
 `.chezmoidata/secrets.toml` (`bws`, `bw`, `rbw`) and prints a table
@@ -290,7 +302,8 @@ The `secrets` check probes, read-only, the secret-manager CLIs declared in
 are `ok`, `warn` (locked or unreachable) and `fail`; any `fail` exits 1, `warn`
 alone exits 0. No entries declared prints a note and exits 0; an invalid
 registry exits 1 without probing (`chezmoi dots lint secrets`). It never prints
-a secret. Each CLI call times out after 15 seconds. Environment: the `bws` token
+a secret. Each CLI call times out after 15 seconds. Environment: the shared
+chezmoi settings apply to this check, and the `bws` token
 is read with `chezmoi secret keyring get`. See [secrets](secrets.md).
 
 ```sh
