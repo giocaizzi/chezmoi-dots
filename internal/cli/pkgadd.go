@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
@@ -447,7 +448,11 @@ func (d Deps) inspectArchives(ctx context.Context, spec pkgAddSpec, prop *ghrele
 	for _, k := range slices.Sorted(maps.Keys(cands)) {
 		list := "none"
 		if len(cands[k]) > 0 {
-			list = strings.Join(cands[k], ", ")
+			quoted := make([]string, len(cands[k]))
+			for i, c := range cands[k] {
+				quoted[i] = strconv.Quote(c) // archive names are untrusted: no raw control sequences
+			}
+			list = strings.Join(quoted, ", ")
 		}
 		parts = append(parts, k+": "+list)
 	}

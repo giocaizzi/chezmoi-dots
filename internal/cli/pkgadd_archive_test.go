@@ -60,12 +60,20 @@ const (
 
 // ghArchives serves a darwin, linux and windows archive of example-tool; binary is the
 // name of the executable inside the unix ones.
+// They use goreleaser's layout: a directory named after the version and the platform,
+// which the registry's target values (with the archive extension) do not reproduce.
 func ghArchives(t *testing.T, binary string) map[string][]byte {
 	t.Helper()
+	return ghArchivesIn(t, binary, "example-tool_1.2.3_linux_amd64/", "example-tool_1.2.3_darwin_arm64/", "example-tool_1.2.3_windows_amd64/")
+}
+
+// ghArchivesIn is ghArchives with the directory of each platform's binary given.
+func ghArchivesIn(t *testing.T, binary, linuxDir, darwinDir, windowsDir string) map[string][]byte {
+	t.Helper()
 	return map[string][]byte{
-		assetLinux:   tarGzWith(t, "example-tool_1.2.3_linux_amd64/"+binary, "example-tool_1.2.3_linux_amd64/README.md"),
-		assetDarwin:  tarGzWith(t, "example-tool_1.2.3_darwin_arm64/"+binary),
-		assetWindows: zipWith(t, "example-tool_1.2.3_windows_amd64/"+binary+".exe"),
+		assetLinux:   tarGzWith(t, linuxDir+binary, linuxDir+"README.md"),
+		assetDarwin:  tarGzWith(t, darwinDir+binary),
+		assetWindows: zipWith(t, windowsDir+binary+".exe"),
 	}
 }
 
@@ -81,15 +89,15 @@ func ghValidData(path string, bodies map[string][]byte) string {
 
 func TestPkgAddGitHubReadsPathFromArchives(t *testing.T) {
 	t.Parallel()
-	bodies := ghArchives(t, "example-tool")
-	e, gh := ghEnv(t, `{}`, ghValidData("example-tool_{version}_{target}/example-tool", bodies))
+	bodies := ghArchivesIn(t, "example-tool", "bin/", "bin/", "bin/")
+	e, gh := ghEnv(t, `{}`, ghValidData("bin/example-tool", bodies))
 	gh.bodies = bodies
 	if err := e.run(t, "example-tool", "--github", "octocat/example-tool", "--yes"); err != nil {
 		t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
 	}
 	text := e.text(t)
 	for _, w := range []string{
-		`path = "example-tool_{version}_{target}/example-tool"` + "\n",
+		`path = "bin/example-tool"` + "\n",
 		`"linux/amd64" = "` + sha(bodies[assetLinux]) + `"`,
 		`"windows/amd64" = "` + sha(bodies[assetWindows]) + `"`,
 	} {
@@ -97,7 +105,7 @@ func TestPkgAddGitHubReadsPathFromArchives(t *testing.T) {
 			t.Errorf("packages.toml lacks %q:\n%s", w, text)
 		}
 	}
-	if want := `  path = "example-tool_{version}_{target}/example-tool"  (found in the archives)` + "\n"; !strings.Contains(e.errw.String(), want) {
+	if want := `  path = "bin/example-tool"  (found in the archives)` + "\n"; !strings.Contains(e.errw.String(), want) {
 		t.Errorf("stderr lacks %q:\n%s", want, e.errw.String())
 	}
 	if strings.Contains(e.errw.String(), "path candidates") {
@@ -108,9 +116,31 @@ func TestPkgAddGitHubReadsPathFromArchives(t *testing.T) {
 	}
 }
 
-func TestPkgAddGitHubDownloadsBeforeTheConfirmation(t *testing.T) {
+// A goreleaser release: the target values carry the archive extension, so the version
+// and platform directory inside cannot be written with {target} and the path is not settled.
+func TestPkgAddGitHubGoreleaserLayoutIsNotFound(t *testing.T) {
 	t.Parallel()
 	bodies := ghArchives(t, "example-tool")
+	e, gh := ghEnv(t, `{}`, ghValidData("example-tool", bodies))
+	gh.bodies = bodies
+	if err := e.run(t, "example-tool", "--github", "octocat/example-tool", "--yes"); err != nil {
+		t.Fatalf("pkg add = %v\n%s", err, e.errw.String())
+	}
+	for _, w := range []string{
+		`  path = "example-tool"  (not found in the archives)` + "\n",
+		`  path candidates: darwin/arm64: "example-tool_1.2.3_darwin_arm64/example-tool"; ` +
+			`linux/amd64: "example-tool_1.2.3_linux_amd64/example-tool"; ` +
+			`windows/amd64: "example-tool_1.2.3_windows_amd64/example-tool.exe"` + "\n",
+	} {
+		if !strings.Contains(e.errw.String(), w) {
+			t.Errorf("stderr lacks %q:\n%s", w, e.errw.String())
+		}
+	}
+}
+
+func TestPkgAddGitHubDownloadsBeforeTheConfirmation(t *testing.T) {
+	t.Parallel()
+	bodies := ghArchivesIn(t, "example-tool", "bin/", "bin/", "bin/")
 	e, gh := ghEnv(t, `{}`)
 	gh.bodies = bodies
 	e.stdin, e.tty = "n\n", true
@@ -141,9 +171,9 @@ func TestPkgAddGitHubPathNotFound(t *testing.T) {
 	}
 	for _, w := range []string{
 		`  path = "example-tool"  (not found in the archives)` + "\n",
-		"  path candidates: darwin/arm64: example-tool_1.2.3_darwin_arm64/run; " +
-			"linux/amd64: example-tool_1.2.3_linux_amd64/run, example-tool_1.2.3_linux_amd64/README.md; " +
-			"windows/amd64: example-tool_1.2.3_windows_amd64/run.exe\n",
+		`  path candidates: darwin/arm64: "example-tool_1.2.3_darwin_arm64/run"; ` +
+			`linux/amd64: "example-tool_1.2.3_linux_amd64/run", "example-tool_1.2.3_linux_amd64/README.md"; ` +
+			`windows/amd64: "example-tool_1.2.3_windows_amd64/run.exe"` + "\n",
 	} {
 		if !strings.Contains(e.errw.String(), w) {
 			t.Errorf("stderr lacks %q:\n%s", w, e.errw.String())
@@ -209,10 +239,8 @@ func TestPkgAddGitHubBareBinariesHaveNoPath(t *testing.T) {
 
 func TestPkgAddGitHubCandidatesAreEscaped(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: archive file names reach the terminal raw", func(t *testing.T) {
+	t.Run("archive file names are quoted", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: printProposal joins the candidate names unquoted, so control sequences in an " +
-			"untrusted archive (cursor moves, OSC 52) are written to stderr; the path line is quoted")
 		bodies := ghArchives(t, "run\x1b[1A\x1b[2K")
 		e, gh := ghEnv(t, `{}`, ghValidData("example-tool", bodies))
 		gh.bodies = bodies
