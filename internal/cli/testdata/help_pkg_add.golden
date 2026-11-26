@@ -24,7 +24,7 @@ OPTIONS
   --npm  install with npm; --npm=<spec> when the spec differs from the name (default: "")
   --release  add a pinned release binary instead of a package (default: "false")
   --requires <answer>  install only when this [data] answer is set (default: "")
-  --roles <roles>  limit to roles (comma list of declared profiles) (default: "")
+  --roles <roles>  limit to roles (comma list of role names your templates define) (default: "")
   --target <os/arch=name>  repeatable release os/arch=name target (default: "")
   --url <template>  release download template with {version} (and {target}) (default: "")
   --uv  install with uv tool; --uv=<spec> when the spec differs from the name (default: "")

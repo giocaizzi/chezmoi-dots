@@ -244,28 +244,20 @@ func TestPkgAddFlagForms(t *testing.T) {
 	}
 }
 
-func TestPkgAddRolesAgainstDeclaredProfiles(t *testing.T) {
+func TestPkgAddRoles(t *testing.T) {
 	t.Parallel()
-	const declared = `{"matrix":{"profile":{"home":{},"minimal":{}}}}`
-	t.Run("undeclared role", func(t *testing.T) {
+	t.Run("empty role name", func(t *testing.T) {
 		t.Parallel()
-		e := newPkgAddEnv(t, pkgAddOldText, declared)
-		err := e.run(t, "wget", "--brew", "--roles", "home,admin")
-		if !errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), "home, minimal") || !strings.Contains(err.Error(), `"admin"`) {
-			t.Fatalf("pkg add = %v, want a usage error naming the declared profiles", err)
+		e := newPkgAddEnv(t, pkgAddOldText, `{}`)
+		err := e.run(t, "wget", "--brew", "--roles", "home,")
+		if !errors.Is(err, cli.ErrUsage) || !strings.Contains(err.Error(), "non-empty names") {
+			t.Fatalf("pkg add = %v, want a usage error about the empty name", err)
 		}
 		if got := e.text(t); got != pkgAddOldText {
 			t.Errorf("a rejected command changed packages.toml:\n%s", got)
 		}
 	})
-	t.Run("declared role", func(t *testing.T) {
-		t.Parallel()
-		e := newPkgAddEnv(t, pkgAddOldText, declared)
-		if err := e.run(t, "wget", "--brew", "--roles", "minimal"); err != nil {
-			t.Fatalf("pkg add = %v, want it to pass", err)
-		}
-	})
-	t.Run("no declaration accepts any name", func(t *testing.T) {
+	t.Run("any name", func(t *testing.T) {
 		t.Parallel()
 		e := newPkgAddEnv(t, pkgAddOldText, `{}`)
 		if err := e.run(t, "wget", "--brew", "--roles", "admin"); err != nil {
