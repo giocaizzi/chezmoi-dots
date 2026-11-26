@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/giocaizzi/chezmoi-dots/internal/archive"
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
 	"github.com/giocaizzi/chezmoi-dots/internal/pkgreg"
 )
@@ -136,26 +137,51 @@ func (f Finder) latestGo(ctx context.Context) (string, error) {
 // SHA256 downloads url and returns the SHA-256 of its body. It fails when the
 // body exceeds MaxBytes or the whole download outlasts DownloadTimeout.
 func (f Finder) SHA256(ctx context.Context, url string) (string, error) {
+	sum, _, err := f.fetch(ctx, url, nil)
+	return sum, err
+}
+
+// countWriter counts the bytes written through it.
+type countWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err //nolint:wrapcheck // passes the writer's own error through
+}
+
+// fetch downloads url and returns the SHA-256 of its body. When consume is set it
+// reads the body through consume first; the rest of the body is then drained into the
+// hash, so the sum covers the whole body whatever consume read. consume's own error
+// is returned apart from fetch's: the download still succeeds.
+func (f Finder) fetch(ctx context.Context, url string, consume func(io.Reader) error) (sum string, consumeErr, err error) {
 	ctx, cancel := context.WithTimeout(ctx, f.downloadTimeout())
 	defer cancel()
 	resp, err := f.do(ctx, url)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer resp.Body.Close()
 	limit := f.maxBytes()
 	if resp.ContentLength > limit {
-		return "", fmt.Errorf("download %s: larger than %d bytes", url, limit)
+		return "", nil, fmt.Errorf("download %s: larger than %d bytes", url, limit)
 	}
 	h := sha256.New()
-	n, err := io.Copy(h, io.LimitReader(resp.Body, limit+1))
-	if err != nil {
-		return "", fmt.Errorf("download %s: %w", url, err)
+	cw := &countWriter{w: h}
+	body := io.TeeReader(io.LimitReader(resp.Body, limit+1), cw)
+	if consume != nil {
+		consumeErr = consume(body)
 	}
-	if n > limit {
-		return "", fmt.Errorf("download %s: larger than %d bytes", url, limit)
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		return "", nil, fmt.Errorf("download %s: %w", url, err)
 	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	if cw.n > limit {
+		return "", nil, fmt.Errorf("download %s: larger than %d bytes", url, limit)
+	}
+	return hex.EncodeToString(h.Sum(nil)), consumeErr, nil
 }
 
 func (f Finder) get(ctx context.Context, url string) (io.ReadCloser, error) {
@@ -223,23 +249,51 @@ func (f Finder) status(ctx context.Context, r pkgreg.Release) Status {
 
 // Sums downloads version of r for every platform and returns the checksums.
 func (f Finder) Sums(ctx context.Context, r pkgreg.Release, version string) (map[string]string, error) {
+	sums, _, err := f.inspect(ctx, r, version, false)
+	return sums, err
+}
+
+// Inspect downloads version of r for every platform once and returns the checksums
+// and, for the platforms whose archive is a .tar.gz, .tgz or .zip, the regular files
+// inside it. files[platform] is nil when the archive is of another kind or cannot be
+// read; the checksum is of the whole download either way.
+func (f Finder) Inspect(ctx context.Context, r pkgreg.Release, version string) (sums map[string]string, files map[string][]archive.File, err error) {
+	return f.inspect(ctx, r, version, true)
+}
+
+func (f Finder) inspect(ctx context.Context, r pkgreg.Release, version string, list bool) (map[string]string, map[string][]archive.File, error) {
 	platforms := r.Platforms()
 	sums := make([]string, len(platforms))
+	listed := make([][]archive.File, len(platforms))
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(3)
 	for i, p := range platforms {
 		g.Go(func() error {
-			s, err := f.SHA256(ctx, r.AssetURL(version, p))
+			url := r.AssetURL(version, p)
+			var consume func(io.Reader) error
+			if kind := archive.KindOf(url); list && kind != archive.None {
+				consume = func(body io.Reader) error {
+					var err error
+					listed[i], err = archive.List(kind, body)
+					return err
+				}
+			}
+			s, cerr, err := f.fetch(ctx, url, consume)
+			if cerr != nil {
+				listed[i] = nil
+			}
 			sums[i] = s
 			return err
 		})
 	}
 	if err := g.Wait(); err != nil {
-		return nil, fmt.Errorf("checksum %s %s: %w", r.Name, version, err)
+		return nil, nil, fmt.Errorf("checksum %s %s: %w", r.Name, version, err)
 	}
 	out := make(map[string]string, len(platforms))
+	files := make(map[string][]archive.File, len(platforms))
 	for i, p := range platforms {
 		out[p] = sums[i]
+		files[p] = listed[i]
 	}
-	return out, nil
+	return out, files, nil
 }

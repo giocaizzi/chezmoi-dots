@@ -163,7 +163,9 @@ func (d Deps) pkgAddRelease(ctx context.Context, cz *chez.Client, file string, s
 		}
 	}
 	entry := spec.rel.Text()
-	if !spec.dry { // a dry run downloads nothing: the checksums are computed when the entry is written
+	// A dry run downloads nothing: the checksums are computed when the entry is written.
+	// An archive release read from GitHub has them already, from the download that listed it.
+	if !spec.dry && spec.rel.Sums == nil {
 		rel := pkgreg.Release{Name: spec.name, Version: spec.rel.Version, URL: spec.rel.URL, Targets: spec.rel.Targets}
 		if spec.rel.Sums, err = d.finder().Sums(ctx, rel, rel.Version); err != nil {
 			return err
@@ -346,21 +348,14 @@ func (p *prompter) confirm(f detect.Found) (*detect.Found, error) {
 	}
 }
 
-// githubRelease reads the latest release of spec.github, prints the entry derived from
-// its assets and has it confirmed.
-func (d Deps) githubRelease(ctx context.Context, spec pkgAddSpec) (*pkgreg.ReleaseEntry, error) {
-	rel, err := ghrelease.Client{HTTP: d.HTTP, Getenv: d.Getenv}.Latest(ctx, spec.github)
-	if err != nil {
-		return nil, err
-	}
-	prop, err := ghrelease.Map(spec.github, rel)
-	if err != nil {
-		return nil, fmt.Errorf("map the assets of %s: %w", spec.github, err)
-	}
-	w := d.Stderr
+// printProposal writes the proposed entry to w; pathNote says how the path was settled.
+func printProposal(w io.Writer, prop ghrelease.Proposal, pathNote, candidates string) {
 	_, _ = fmt.Fprintf(w, "  version = %q\n  url = %q\n  type = %q\n", prop.Version, prop.URL, prop.Type)
 	if prop.Path != "" {
-		_, _ = fmt.Fprintf(w, "  path = %q\n", prop.Path)
+		_, _ = fmt.Fprintf(w, "  path = %q  (%s)\n", prop.Path, pathNote)
+		if candidates != "" {
+			_, _ = fmt.Fprintf(w, "  path candidates: %s\n", candidates)
+		}
 	}
 	if prop.Exe {
 		_, _ = fmt.Fprintln(w, "  exe = true")
@@ -374,6 +369,41 @@ func (d Deps) githubRelease(ctx context.Context, spec pkgAddSpec) (*pkgreg.Relea
 	if len(prop.Ambiguous) > 0 {
 		_, _ = fmt.Fprintf(w, "  ambiguous: %s\n", strings.Join(prop.Ambiguous, "; "))
 	}
+}
+
+// resolvePath settles the path of an archive release: read from the archives, which are
+// downloaded here, unless a dry run or a missing way to confirm makes the command
+// download nothing.
+func (d Deps) resolvePath(ctx context.Context, spec pkgAddSpec, prop *ghrelease.Proposal) (sums map[string]string, note, candidates string, err error) {
+	switch {
+	case spec.dry:
+		return nil, "unchecked: --dry-run downloads no archive", "", nil
+	case !spec.yes && !d.interactive(): // the command fails after the proposal
+		return nil, "unchecked: the proposal cannot be confirmed, so no archive is downloaded", "", nil
+	}
+	return d.inspectArchives(ctx, spec, prop)
+}
+
+// githubRelease reads the latest release of spec.github, prints the entry derived from
+// its assets and has it confirmed. For archives it downloads them first: the path of the
+// binary is read from their contents and the checksums are kept for the write.
+func (d Deps) githubRelease(ctx context.Context, spec pkgAddSpec) (*pkgreg.ReleaseEntry, error) {
+	rel, err := ghrelease.Client{HTTP: d.HTTP, Getenv: d.Getenv}.Latest(ctx, spec.github)
+	if err != nil {
+		return nil, err
+	}
+	prop, err := ghrelease.Map(spec.github, rel)
+	if err != nil {
+		return nil, fmt.Errorf("map the assets of %s: %w", spec.github, err)
+	}
+	var sums map[string]string
+	var pathNote, candidates string
+	if prop.Type == typeArchiveFile {
+		if sums, pathNote, candidates, err = d.resolvePath(ctx, spec, &prop); err != nil {
+			return nil, err
+		}
+	}
+	printProposal(d.Stderr, prop, pathNote, candidates)
 	switch {
 	case spec.yes:
 	case !d.interactive():
@@ -389,8 +419,39 @@ func (d Deps) githubRelease(ctx context.Context, spec pkgAddSpec) (*pkgreg.Relea
 	}
 	return &pkgreg.ReleaseEntry{
 		Name: spec.name, Version: prop.Version, URL: prop.URL, Type: prop.Type, Path: prop.Path, Exe: prop.Exe,
-		Targets: prop.Targets, Roles: spec.rel.Roles, Requires: spec.rel.Requires,
+		Targets: prop.Targets, Sums: sums, Roles: spec.rel.Roles, Requires: spec.rel.Requires,
 	}, nil
+}
+
+const typeArchiveFile = "archive-file"
+
+// inspectArchives downloads the archive of every target once, for the checksums and the
+// listing, and sets prop.Path to the binary found in them. note says how that went;
+// candidates, when the path was not found, lists what each archive holds.
+func (d Deps) inspectArchives(ctx context.Context, spec pkgAddSpec, prop *ghrelease.Proposal) (sums map[string]string, note, candidates string, err error) {
+	rel := pkgreg.Release{Name: spec.name, Version: prop.Version, URL: prop.URL, Targets: prop.Targets}
+	sums, files, err := d.finder().Inspect(ctx, rel, rel.Version)
+	if err != nil {
+		return nil, "", "", err
+	}
+	_, repo, _ := strings.Cut(spec.github, "/")
+	found, ok, cands := ghrelease.ProposePath([]string{spec.name, repo}, *prop, files)
+	switch {
+	case ok:
+		prop.Path = found
+		return sums, "found in the archives", "", nil
+	case len(cands) == 0:
+		return sums, "unchecked: no .tar.gz, .tgz or .zip archive could be read", "", nil
+	}
+	parts := make([]string, 0, len(cands))
+	for _, k := range slices.Sorted(maps.Keys(cands)) {
+		list := "none"
+		if len(cands[k]) > 0 {
+			list = strings.Join(cands[k], ", ")
+		}
+		parts = append(parts, k+": "+list)
+	}
+	return sums, "not found in the archives", strings.Join(parts, "; "), nil
 }
 
 // parsePkgAdd checks the command line and builds the entry it describes.
