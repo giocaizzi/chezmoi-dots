@@ -136,7 +136,7 @@ type Proposal struct {
 	Version   string            // the tag without a leading "v"
 	URL       string            // template with {version} and {target}
 	Type      string            // "file" (bare binaries) or "archive-file" (archives)
-	Path      string            // for archive-file: the binary inside the archive, the repo name (extExe is not added); "" for file
+	Path      string            // for archive-file: the binary inside the archive, the repo name until ProposePath reads the archives (extExe is not added); "" for file
 	Exe       bool              // a windows target was mapped
 	Targets   map[string]string // "os/arch" -> the {target} value
 	Unmapped  []string          // asset names left out (checksums, signatures, packages, unknown os/arch), sorted
@@ -386,6 +386,11 @@ func groupCandidates(assets []Asset, unmapped map[string]bool) map[string][]cand
 // templVersion returns name[lo:hi] with version replaced by "{version}" where
 // it is a whole token of name: bounded by the ends of name or a separator.
 func templVersion(name, version string, lo, hi int) string {
+	return templVersionSep(name, version, lo, hi, osSeparator)
+}
+
+// templVersionSep is templVersion with seps as the token separators.
+func templVersionSep(name, version string, lo, hi int, seps string) string {
 	if version == "" {
 		return name[lo:hi]
 	}
@@ -393,8 +398,8 @@ func templVersion(name, version string, lo, hi int) string {
 	for i := lo; i < hi; {
 		end := i + len(version)
 		if strings.HasPrefix(name[i:hi], version) &&
-			tokenStart(name, i) &&
-			(end == len(name) || strings.IndexByte(osSeparator, name[end]) >= 0) {
+			tokenStart(name, i, seps) &&
+			(end == len(name) || strings.IndexByte(seps, name[end]) >= 0) {
 			b.WriteString("{version}")
 			i = end
 			continue
@@ -407,11 +412,11 @@ func templVersion(name, version string, lo, hi int) string {
 
 // tokenStart reports whether a token of name may start at i: at the start of
 // name, after a separator, or after a lone "v" that does (a "v1.2.3" tag form).
-func tokenStart(name string, i int) bool {
+func tokenStart(name string, i int, seps string) bool {
 	if i > 0 && name[i-1] == 'v' {
 		i--
 	}
-	return i == 0 || strings.IndexByte(osSeparator, name[i-1]) >= 0
+	return i == 0 || strings.IndexByte(seps, name[i-1]) >= 0
 }
 
 // fillTemplate sets URL and Targets from the chosen assets and checks that

@@ -13,6 +13,7 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `internal/pkgreg/` — Package and release registry validator and version comparator.
 - `internal/release/` — Remote release fetcher, commit HEAD lookups and automated checksum bumper (`dots pkg bump`).
 - `internal/extpin/` — Commit-pinned archive externals in `.chezmoiexternal` files: scan and in-place bump.
+- `internal/archive/` — Lists the regular files of a `.tar.gz`, `.tgz` or `.zip` stream without extracting it (`pkg add --github` reads the binary path from it).
 - `internal/inventory/` — System package and tool inventory scanner across package managers.
 - `internal/audit/` — Live unmanaged shell alias detector (`dots audit`).
 - `internal/aliasreg/` — Cross-shell alias registry compiler.
