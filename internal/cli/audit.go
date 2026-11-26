@@ -3,26 +3,94 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/giocaizzi/chezmoi-dots/internal/audit"
 	"github.com/giocaizzi/chezmoi-dots/internal/chez"
+	"github.com/giocaizzi/chezmoi-dots/internal/term"
+	"github.com/giocaizzi/chezmoi-dots/internal/vaultcheck"
 )
 
-// audit runs the live checks; aliases is the only one, so naming it or nothing runs it.
+// audit runs the live checks in the order aliases, secrets; with no argument all run.
 func (d Deps) audit(ctx context.Context, args []string) error {
 	checks, err := parse(newFlags(cmdAudit), args)
 	if err != nil {
 		return err
 	}
 	for _, c := range checks {
-		if c != cmdAliases {
-			return &commandError{command: cmdAudit, err: fmt.Errorf("%w: unknown audit check %q (checks: %s)", ErrUsage, c, cmdAliases)}
+		if c != cmdAliases && c != cmdSecrets {
+			return &commandError{command: cmdAudit, err: fmt.Errorf("%w: unknown audit check %q (checks: %s, %s)", ErrUsage, c, cmdAliases, cmdSecrets)}
 		}
 	}
-	return d.auditAliases(ctx)
+	if len(checks) == 0 {
+		checks = []string{cmdAliases, cmdSecrets}
+	}
+	failed := false
+	for _, c := range checks {
+		run := d.auditAliases
+		if c == cmdSecrets {
+			run = d.auditSecrets
+		}
+		if err := run(ctx); errors.Is(err, ErrReported) {
+			failed = true
+		} else if err != nil {
+			return err
+		}
+	}
+	if failed {
+		return ErrReported
+	}
+	return nil
+}
+
+// auditSecrets probes the secret managers the registry declares; it never prints a secret.
+func (d Deps) auditSecrets(ctx context.Context) error {
+	cz, global := d.chezmoi()
+	data, err := cz.Data(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("read chezmoi data: %w", err)
+	}
+	p := vaultcheck.Prober{
+		Runner: d.Runner, LookPath: d.LookPath, Home: d.Home,
+		Keyring: vaultcheck.ChezmoiKeyring{Runner: d.Runner, Chezmoi: global},
+	}
+	results, found := p.CheckAll(ctx, data)
+	if len(found) > 0 {
+		st := term.NewStyle(d.Stderr, d.Getenv)
+		fmt.Fprintf(d.Stderr, "%s✗%s secrets\n%s\n  fix the registry (chezmoi dots lint secrets)\n", st.R, st.O, joinLines(found))
+		return ErrReported
+	}
+	if ignored := vaultcheck.Ignored(data); len(ignored) > 0 {
+		defer func() {
+			fmt.Fprintf(d.Stdout, "secrets: ignored data.secret entries without a kind: %s (see docs/secrets.md)\n", strings.Join(ignored, ", "))
+		}()
+	}
+	if len(results) == 0 {
+		fmt.Fprintln(d.Stdout, "secrets: no entries declared (.chezmoidata/secrets.toml)")
+		return nil
+	}
+	st := term.NewStyle(d.Stdout, d.Getenv)
+	colour := map[vaultcheck.State]string{vaultcheck.OK: st.G, vaultcheck.Warn: st.Y, vaultcheck.Fail: st.R}
+	rows := make([][]string, 0, len(results))
+	failed := false
+	for _, r := range results {
+		failed = failed || r.State == vaultcheck.Fail
+		rows = append(rows, []string{r.Name, r.Kind, colour[r.State] + r.State.String() + st.O, r.Detail})
+	}
+	st.Table(d.Stdout, []string{"NAME", "KIND", "STATE", "DETAIL"}, rows)
+	for _, r := range results {
+		if r.State != vaultcheck.OK && r.Hint != "" {
+			fmt.Fprintf(d.Stdout, "  %s: %s\n", r.Name, r.Hint)
+		}
+	}
+	if failed {
+		return ErrReported
+	}
+	return nil
 }
 
 // auditAliases lists the aliases live in this machine's interactive shells that the

@@ -26,6 +26,10 @@ type Cmd struct {
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
+	// Group runs the process in its own process group (Unix) or tree (Windows) and,
+	// when the context ends, kills the whole group, not only the direct child. Never
+	// set it for an interactive child: it leaves the terminal's foreground group.
+	Group bool
 }
 
 // Runner runs a Cmd to completion.
@@ -48,6 +52,9 @@ func (ExecRunner) Run(ctx context.Context, c Cmd) error {
 	cmd.Stderr = c.Stderr
 	if len(c.Env) > 0 {
 		cmd.Env = append(cmd.Environ(), c.Env...)
+	}
+	if c.Group {
+		groupCmd(cmd)
 	}
 	cmd.WaitDelay = waitDelay
 	// ErrWaitDelay with a live context means the child exited 0 and only a

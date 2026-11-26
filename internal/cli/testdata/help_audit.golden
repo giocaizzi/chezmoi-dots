@@ -1,10 +1,10 @@
-chezmoi dots audit — Audit live shell configuration
+chezmoi dots audit — Audit live shell and secrets configuration
 
 USAGE
   chezmoi dots audit [<check>...]
 
 ARGUMENTS
-  check  aliases: detect unmanaged live shell aliases in the available zsh and bash interactive shells (default: all checks).
+  check  aliases: detect unmanaged live shell aliases in the available zsh and bash interactive shells; secrets: probe the CLIs declared in .chezmoidata/secrets.toml (bws, bw, rbw) read-only, never printing a secret (default: all checks).
   Checks are arguments, not subcommands.
 
 OPTIONS
@@ -17,3 +17,4 @@ ENVIRONMENT
 EXAMPLES
   chezmoi dots audit
   chezmoi dots audit aliases
+  chezmoi dots audit secrets

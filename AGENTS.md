@@ -17,6 +17,7 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `internal/inventory/` — System package and tool inventory scanner across package managers.
 - `internal/audit/` — Live unmanaged shell alias detector (`dots audit`).
 - `internal/aliasreg/` — Cross-shell alias registry compiler.
+- `internal/vaultcheck/` — Secrets registry validation and read-only secret-manager CLI probe (`dots audit secrets`); see [docs/secrets.md](docs/secrets.md).
 - `internal/cli/` — Command parsing, help and wiring of adapters into use cases.
 - `internal/survey/` — Fills the `pkg status` overview from package managers, release binaries and git.
 - `internal/registry/` — Edit registry (`.chezmoidata/edit.toml`) parse and add.

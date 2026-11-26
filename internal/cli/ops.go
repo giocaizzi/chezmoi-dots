@@ -99,7 +99,7 @@ func (d Deps) pkg(ctx context.Context, args []string) error {
 		return d.bump(ctx, args[1:])
 	case "add":
 		return d.pkgAdd(ctx, args[1:])
-	case "-h", "--help":
+	case "-h", helpFlag:
 		return &commandError{command: cmdPkg, err: flag.ErrHelp}
 	default:
 		return &commandError{command: cmdPkg, err: fmt.Errorf("%w: unknown pkg command %q (commands: status, bump, add)", ErrUsage, args[0])}

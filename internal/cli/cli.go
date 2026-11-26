@@ -40,22 +40,26 @@ var ErrReported = edit.ErrReported
 var ErrUsage = edit.ErrUsage
 
 const (
-	cmdEdit     = "edit"
-	cmdAdd      = "add"
-	cmdStatus   = "status"
-	cmdView     = "view"
-	cmdList     = "list"
-	cmdLint     = "lint"
-	cmdAudit    = "audit"
-	cmdAliases  = "aliases"
-	cmdPkg      = "pkg"
-	cmdPkgState = "pkg status"
-	cmdPkgBump  = "pkg bump"
-	cmdPkgAdd   = "pkg add"
-	cmdUpgrade  = "upgrade"
-	cmdLive     = "live"
-	cmdVersion  = "version"
-	cmdHelp     = "help"
+	cmdEdit       = "edit"
+	cmdAdd        = "add"
+	cmdStatus     = "status"
+	cmdView       = "view"
+	cmdList       = "list"
+	cmdLint       = "lint"
+	cmdAudit      = "audit"
+	cmdAliases    = "aliases"
+	cmdSecrets    = "secrets"
+	cmdSecretsRun = "secrets run"
+	cmdPkg        = "pkg"
+	cmdPkgState   = "pkg status"
+	cmdPkgBump    = "pkg bump"
+	cmdPkgAdd     = "pkg add"
+	cmdUpgrade    = "upgrade"
+	cmdLive       = "live"
+	cmdVersion    = "version"
+	cmdHelp       = "help"
+
+	helpFlag = "--help"
 )
 
 type commandError struct {
@@ -71,9 +75,9 @@ func Run(ctx context.Context, d Deps, args []string) error {
 	cmd, rest := cmdEdit, args
 	if len(args) > 0 {
 		switch args[0] {
-		case cmdEdit, cmdAdd, cmdStatus, cmdView, cmdList, cmdLint, cmdAudit, cmdPkg, cmdUpgrade, cmdLive, cmdVersion, cmdHelp:
+		case cmdEdit, cmdAdd, cmdStatus, cmdView, cmdList, cmdLint, cmdAudit, cmdSecrets, cmdPkg, cmdUpgrade, cmdLive, cmdVersion, cmdHelp:
 			cmd, rest = args[0], args[1:]
-		case "-h", "--help":
+		case "-h", helpFlag:
 			cmd, rest = "", args
 		}
 	}
@@ -112,6 +116,8 @@ func (d Deps) run(ctx context.Context, cmd string, args []string) error {
 		return d.lint(ctx, args)
 	case cmdAudit:
 		return d.audit(ctx, args)
+	case cmdSecrets:
+		return d.secrets(ctx, args)
 	case cmdPkg:
 		return d.pkg(ctx, args)
 	case cmdUpgrade:

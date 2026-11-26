@@ -14,12 +14,13 @@ Examples below use `chezmoi dots`; `dots` also works if you define that alias.
 | `status` | none | Show the dotfiles checkout and what `chezmoi apply` would change |
 | `upgrade` | `[<step>...]` | Run system and dotfiles upgrades |
 | `lint` | `[<check>...]` | Validate registries and templates |
-| `audit` | `[<check>...]` | Audit live machine state against the registries |
+| `audit` | `[<check>...]` | Audit live shell aliases and secret-manager configuration against the registries |
 | `pkg` | `status`, `bump`, `add` | Survey and update pinned packages, releases and archive externals, and add packages and releases |
+| `secrets` | `run` | Run a declared secret-manager CLI with its token |
 | `version` | none | Print the binary version |
 | `help` | `[<command> [<subcommand>]]` | Show root or local help |
 
-Only `pkg` has subcommands (`status`, `bump`, `add`). Lint checks, audit checks, pin
+Only `pkg` (`status`, `bump`, `add`) and `secrets` (`run`) have subcommands. Lint checks, audit checks, pin
 names and upgrade steps are arguments, not subcommands. The internal `live`
 command is [documented separately](#internal-live-command) and omitted from the
 root index. There is no `tree` command and `list` does not accept a pattern.
@@ -189,7 +190,8 @@ chezmoi dots lint [<check>...]
 ```
 
 Checks are `registry`, `aliases`, `packages` (the rules are in the
-[package registry](registry.md)), `matrix`, `templates`. With none,
+[package registry](registry.md)), `secrets` (validates
+[`.chezmoidata/secrets.toml`](secrets.md#lint)), `matrix`, `templates`. With none,
 run all in that order; explicit arguments run in the supplied order. Findings
 and check summaries go to stderr. The `matrix` check validates the matrix declaration
 (see [matrix.md](matrix.md)); `templates` renders every shell, zsh,
@@ -270,8 +272,9 @@ chezmoi dots upgrade uv npm --dry-run
 chezmoi dots audit [<check>...]
 ```
 
-Like `lint`, checks are arguments. The only check is `aliases`; with no argument
-all checks run, and an unknown check is a usage error (exit 2). The `aliases`
+Like `lint`, checks are arguments. The checks are `aliases` and `secrets`; with no
+argument all checks run in that order, and an unknown check is a usage error
+(exit 2). The `aliases`
 check audits interactive Zsh and Bash aliases against rendered alias files and
 enabled Oh My Zsh plugins. Shells absent from `PATH` are skipped; unmanaged
 aliases make the check fail. Options: only `-h`, `--help`.
@@ -281,9 +284,19 @@ Environment: `XDG_CONFIG_HOME` (default `~/.config`) locates
 read under `~/.oh-my-zsh/plugins`. Apply your dotfiles first so rendered aliases
 exist. Interactive shell startup files affect the aliases observed.
 
+The `secrets` check probes, read-only, the secret-manager CLIs declared in
+`.chezmoidata/secrets.toml` (`bws`, `bw`, `rbw`) and prints a table
+`NAME KIND STATE DETAIL` with a hint line under it for each non-ok entry. States
+are `ok`, `warn` (locked or unreachable) and `fail`; any `fail` exits 1, `warn`
+alone exits 0. No entries declared prints a note and exits 0; an invalid
+registry exits 1 without probing (`chezmoi dots lint secrets`). It never prints
+a secret. Each CLI call times out after 15 seconds. Environment: the `bws` token
+is read with `chezmoi secret keyring get`. See [secrets](secrets.md).
+
 ```sh
 chezmoi dots audit
 chezmoi dots audit aliases
+chezmoi dots audit secrets
 ```
 
 ## pkg status
@@ -558,6 +571,43 @@ chezmoi dots pkg add example-tool --release --version 1.2.3 \
   --url 'https://example.com/{version}/tool-{target}.tar.gz' \
   --target linux/amd64=linux-x86_64 --target darwin/arm64=macos-arm --dry-run
 chezmoi dots pkg add example-tool --github octocat/example-tool --dry-run
+```
+
+## secrets run
+
+```text
+chezmoi dots secrets run <name> [--timeout <duration>] [--] [<args>...]
+```
+
+Run the CLI of the `bws` entry `<name>` declared in `.chezmoidata/secrets.toml`,
+with its access token from the keyring set as `BWS_ACCESS_TOKEN` in the child's
+environment. `secrets` alone or `secrets -h` shows the group help; an unknown
+subcommand is a usage error (exit 2) listing `run`.
+
+The arguments are split at the first literal `--` before options are parsed.
+Before it: `--timeout`, `-h`, `--help` and the positionals `<name>`. After it:
+passed to the CLI verbatim and never parsed, so `-h` or `--output` reach the CLI.
+An unknown option before `--` is a usage error that adds
+`put the CLI's arguments after --`. `--timeout` is a Go duration; the default `0`
+means no timeout and a negative value is a usage error (on expiry:
+`bws timed out after <duration>`, exit 1).
+
+A missing name (`secrets run needs a name`), a name that is not declared, and a
+`bw` or `rbw` entry (no token injection; use the CLI's own session) are usage
+errors (exit 2). The CLI's own exit code is passed through, printing nothing
+more: on Unix a CLI killed by a signal exits 128+N (143 for SIGTERM), Ctrl-C exits
+130, and on Windows the code is the one reported. An invalid registry, a missing
+CLI, a missing token or a timeout exit 1. On timeout or Ctrl-C the CLI's whole
+process tree is killed.
+The CLI is the entry's `command` or `bws` on `PATH`; nothing else overrides it,
+and no shell is used. The CLI's output is not filtered. Environment: shared
+chezmoi settings; the child inherits the environment. See
+[secrets](secrets.md#running-a-cli-with-its-token-secrets-run) and
+[using it from a template](secrets.md#using-it-from-a-template).
+
+```sh
+chezmoi dots secrets run example-vault -- project list
+chezmoi dots secrets run example-vault -- secret list 00000000-0000-0000-0000-000000000000 --output json --color no
 ```
 
 ## version
