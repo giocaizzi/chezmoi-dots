@@ -147,13 +147,15 @@ chezmoi dots add ~/projects/notes --local --desc "Notes folder"
 ## view
 
 ```text
-chezmoi dots view [--as <os>[,<role>]] [--matrix] [<what>]
+chezmoi dots view [--as <os>[,<profile>]] [--matrix] [<what>]
 ```
 
 With one selector, show composition and the rendered target for this machine by
 default. `--as` renders one configuration: OS is `darwin`, `linux` or `windows`;
-role is `personal` (default), `work` or `light`. Both `linux,work` and
-`linux/work` are accepted. `--matrix` renders all nine configurations. With no
+profile is a profile declared in the matrix. Both `linux,home` and `linux/home`
+are accepted. The profile may be omitted only when exactly one profile exists;
+otherwise it is an error listing the profiles. `--matrix` renders every
+OS/profile configuration (3 x the number of profiles). With no
 selector, `--matrix` shows an overview across registry entries; without it a
 selector is required. `--as` cannot be combined with `--matrix`. How each
 configuration's data is produced is described in [matrix.md](matrix.md).
@@ -163,7 +165,7 @@ Options: `--as` (default empty/current machine), `--matrix` (false), `-h`,
 
 ```sh
 chezmoi dots view git
-chezmoi dots view git --as linux,work
+chezmoi dots view git --as linux,home
 chezmoi dots view --matrix
 ```
 
@@ -189,8 +191,9 @@ chezmoi dots lint [<check>...]
 Checks are `registry`, `aliases`, `packages`, `matrix`, `templates`. With none,
 run all in that order; explicit arguments run in the supplied order. Findings
 and check summaries go to stderr. The `matrix` check validates the matrix declaration
-(see [matrix.md](matrix.md)); template checks render every configuration and
-validate rendered files with available linters.
+(see [matrix.md](matrix.md)); `templates` renders every shell, zsh,
+PowerShell and JSON template for every configuration and lints the result with
+the available linters (details in [matrix.md](matrix.md#template-linting)).
 
 Options: only `-h`, `--help`. Environment: shared chezmoi/output settings and
 `PATH` for external validators. Alias validation can use the age identity

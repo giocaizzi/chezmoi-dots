@@ -29,8 +29,8 @@ Declarative registry-driven editing, package survey and drift detection, pin bum
 - **Status Snapshot (`dots status`)**: See the dotfiles checkout (branch, ahead/behind, local changes) and what `chezmoi apply` would change, without touching the network.
 - **Package Survey & Pins (`dots pkg status`, `dots pkg bump`)**: Query Homebrew, Apt, winget, uv, npm, and GitHub Releases to detect version drift against your pins. Also tracks commit-pinned archive externals. Update pins with comment-preserving text edits.
 - **Live Preview**: Editing can render live updates to a side pane using tmux or Windows Terminal; `live` is the internal pane command.
-- **Template Composition (`dots view`)**: Inspect a target's composition tree and rendered content, including previews across OS/role configurations.
-- **Template Linting (`dots lint`)**: Verify template syntax, detect unrendered delimiters, and validate cross-OS matrix configurations.
+- **Template Composition (`dots view`)**: Inspect a target's composition tree and rendered content, including previews across OS/profile configurations.
+- **Template Linting (`dots lint`)**: Verify template syntax, detect unrendered delimiters, and render shell, zsh, PowerShell and JSON templates for every OS/profile configuration and lint them.
 
 ---
 
