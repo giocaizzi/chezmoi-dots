@@ -415,11 +415,8 @@ func TestListZipCentralDirectory(t *testing.T) {
 			t.Errorf("List = %d files, %v; want one file", len(files), err)
 		}
 	})
-	t.Run("xfail: an understated directory size does not get past the cap", func(t *testing.T) {
+	t.Run("an understated directory size does not get past the cap", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: checkCentralDir trusts the size and count the EOCD declares, but zip.NewReader " +
-			"reads directory headers from the offset until a bad one (and compares the count mod 65536 only), " +
-			"so a forged EOCD gets any directory up to the spool cap built in memory (1.4 GiB for a 255 MiB zip)")
 		entries := make([]entry, 200)
 		for i := range entries {
 			entries[i] = entry{name: fmt.Sprintf("d/file-%d", i), mode: 0o755}
