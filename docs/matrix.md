@@ -28,8 +28,9 @@ any other profile name (the whole name otherwise), first letter upper-cased:
 
 Each configuration is rendered against its own config file: the source's config
 template rendered for that (OS, profile), never this machine's config. The
-template is `.chezmoi.toml.tmpl`, `.chezmoi.yaml.tmpl` or `.chezmoi.json.tmpl`
-(first found, in that order), rendered with `chezmoi execute-template --init
+template is `.chezmoi.toml.tmpl`, `.chezmoi.yaml.tmpl`, `.chezmoi.json.tmpl` or
+`.chezmoi.jsonc.tmpl`; more than one is an error, as in chezmoi. It is rendered
+with `chezmoi execute-template --init
 --no-tty` against a scratch config whose data holds only the seed answers and
 the profile's answers (profile overrides seed). Only `.chezmoi.os` (and a
 variant's `set`) is passed on top. Nothing from this machine's config `[data]`
@@ -37,7 +38,9 @@ reaches a configuration, and `.chezmoidata` values apply exactly as after
 `chezmoi init` with those answers. Without a config template, a configuration's
 config data is just the declared answers. The rendered config replaces this
 machine's config for that configuration, so settings such as `destDir` come
-only from the template (chezmoi's defaults when it sets none).
+only from the template (chezmoi's defaults when it sets none). Every
+configuration render is also given the resolved source dir (`--source`), so
+`sourceDir` in this machine's config still selects the source.
 
 Only `.chezmoi.os` is overridden. `.chezmoi.arch`, `homeDir`, `hostname`,
 `osRelease`, `kernel`, path separators and the rest stay this host's (a windows
@@ -105,8 +108,10 @@ help for templates that call a tool by absolute path, so the declaration is the
 mechanism.
 
 `lint templates` skips templates whose own actions, or partials reached via
-`template`/`includeTemplate` (in `.chezmoitemplates`), call a password-manager,
-secret or decrypt function. It does not skip `output`/`outputList` (any
+`template`/`includeTemplate` (in `.chezmoitemplates`; `includeTemplate` also
+relative to the source dir, as chezmoi resolves it), call a password-manager,
+secret or decrypt function. Names that are not string literals (variables,
+`printf`) are not followed. It does not skip `output`/`outputList` (any
 command) or the `gitHub*` network functions: gate those on a declared answer or
 on `dotsRender`.
 
@@ -132,8 +137,9 @@ declaration is invalid (chezmoi dots lint matrix)" when it is invalid. `edit` is
 the exception: it warns, skips the per-configuration check and still opens the
 editor, so the declaration can be repaired.
 
-Package and alias registry `roles` and `machines` are validated against the
-declared profiles (any non-empty name when none are declared).
+Registry `roles` and `machines` are free-form non-empty names your templates
+define (for example via your own `role` partial); they are not tied to matrix
+profile names.
 
 ## Migrating
 
