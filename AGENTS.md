@@ -43,6 +43,10 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `make test-help-goldens` — Regenerate the help golden files.
 - `make build` — Build cross-platform binaries into `bin/`.
 
+## Docs
+
+The documentation lives in `docs/`; start at [docs/README.md](docs/README.md).
+
 ## Conventional Commits
 
 Commits must follow Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`). Pull requests are auto-merged using squash commits once CI checks pass.
