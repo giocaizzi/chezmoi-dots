@@ -134,6 +134,7 @@ It works for `bws` entries only: `bw` and `rbw` have no token to inject, so
   `bws timed out after <duration>`.
 - A missing keyring item (or an empty value) fails with `no access token in the keyring (service <s>, user <u>)` and the `chezmoi secret keyring set` hint. Any other keyring failure (chezmoi not found, locked keychain, no Secret Service on headless Linux) fails with `read the access token (service <s>, user <u>): <cause>`.
 - The CLI's output goes straight to stdout and stderr, and stdin is passed through.
+- On timeout or Ctrl-C, `secrets run` and the audit probes kill the CLI's whole process tree (its own process group on Unix, `taskkill /T` on Windows), so the children of a wrapper script do not keep the token.
 
 Exit codes: the CLI's own exit code when it fails; 2 for a usage error (no name,
 unknown subcommand, a name that is not declared, a `bw` or `rbw` entry, an
