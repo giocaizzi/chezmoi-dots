@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -340,7 +339,7 @@ func TOML(seed map[string]any) string {
 		case bool:
 			fmt.Fprintf(&b, "%s = %t\n", k, v)
 		case string:
-			fmt.Fprintf(&b, "%s = %s\n", k, strconv.Quote(v))
+			fmt.Fprintf(&b, "%s = %s\n", k, quote(v))
 		case []string:
 			fmt.Fprintf(&b, "%s = [%s]\n", k, quoteAll(v))
 		case []any:
@@ -356,10 +355,41 @@ func TOML(seed map[string]any) string {
 	return b.String()
 }
 
+// quote returns s as a TOML basic string: quote, backslash and control characters are
+// escaped the way TOML spells them (not Go's \x, \a or \v).
+func quote(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch {
+		case r == '"':
+			b.WriteString(`\"`)
+		case r == '\\':
+			b.WriteString(`\\`)
+		case r == '\b':
+			b.WriteString(`\b`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\f':
+			b.WriteString(`\f`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, `\u%04X`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
 func quoteAll(v []string) string {
 	q := make([]string, len(v))
 	for i, s := range v {
-		q[i] = strconv.Quote(s)
+		q[i] = quote(s)
 	}
 	return strings.Join(q, ", ")
 }

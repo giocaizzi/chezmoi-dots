@@ -274,3 +274,23 @@ func TestTOML(t *testing.T) {
 		t.Errorf("TOML() = %q, want %q", got, want)
 	}
 }
+
+func TestQuote(t *testing.T) {
+	t.Parallel()
+	tests := []struct{ name, in, want string }{
+		{"plain", "abc", `"abc"`},
+		{"quote and backslash", `a"b\c`, `"a\"b\\c"`},
+		{"named controls", "\b\t\n\f\r", `"\b\t\n\f\r"`},
+		{"other controls", "\x01\a\v\x1f\x7f", `"\u0001\u0007\u000B\u001F\u007F"`},
+		{"unicode kept", "caffè ☃", `"caffè ☃"`},
+		{"empty", "", `""`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := quote(tt.in); got != tt.want {
+				t.Errorf("quote(%q) = %s, want %s", tt.in, got, tt.want)
+			}
+		})
+	}
+}
