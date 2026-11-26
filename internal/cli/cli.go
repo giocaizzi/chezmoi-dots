@@ -48,6 +48,7 @@ const (
 	cmdLint     = "lint"
 	cmdAudit    = "audit"
 	cmdAliases  = "aliases"
+	cmdSecrets  = "secrets"
 	cmdPkg      = "pkg"
 	cmdPkgState = "pkg status"
 	cmdPkgBump  = "pkg bump"

@@ -11,7 +11,7 @@ COMMANDS
   status     Dotfiles repository and apply status
   upgrade    Run system and dotfile upgrade steps
   lint       Check registries and rendered templates
-  audit      Audit live shell configuration
+  audit      Audit live shell and secrets configuration
   pkg        Package and pinned release lifecycle
   version    Print version information
   help       Show command help

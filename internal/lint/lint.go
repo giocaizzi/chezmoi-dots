@@ -21,11 +21,12 @@ import (
 	"github.com/giocaizzi/chezmoi-dots/internal/matrix"
 	"github.com/giocaizzi/chezmoi-dots/internal/pkgreg"
 	"github.com/giocaizzi/chezmoi-dots/internal/registry"
+	"github.com/giocaizzi/chezmoi-dots/internal/vaultcheck"
 )
 
 // Checks lists the check names, in the order `lint` runs them.
 func Checks() []string {
-	return []string{"registry", "aliases", "packages", "matrix", "templates"}
+	return []string{"registry", "aliases", "packages", "secrets", "matrix", "templates"}
 }
 
 // Linter runs the checks against one source dir.
@@ -48,6 +49,8 @@ func (l Linter) Run(ctx context.Context, name string) ([]finding.Finding, error)
 		return l.aliases(ctx)
 	case "packages":
 		return l.packages(ctx)
+	case "secrets":
+		return l.secrets(ctx)
 	case "matrix":
 		return l.matrix()
 	case "templates":
@@ -120,6 +123,14 @@ func (l Linter) packages(ctx context.Context) ([]finding.Finding, error) {
 		return nil, err
 	}
 	return pkgreg.Validate(data), nil
+}
+
+func (l Linter) secrets(ctx context.Context) ([]finding.Finding, error) {
+	data, err := l.Iso.Data(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return vaultcheck.Validate(data), nil
 }
 
 // matrix checks the config template's [data] keys against what the matrix seeds:
