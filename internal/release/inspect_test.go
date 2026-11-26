@@ -142,3 +142,29 @@ func TestInspectKeepsLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestInspectChecksumsArchivesOverTheListingLimits(t *testing.T) {
+	t.Parallel()
+	bodies := map[string][]byte{
+		"/long.tar.gz": tarGzOf(t, strings.Repeat("a", 5000), 0o755, 4096), // name over the cap: List stops at the header
+		"/long.zip":    zipOf(t, strings.Repeat("a", 5000)),
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(bodies[r.URL.Path])
+	}))
+	t.Cleanup(srv.Close)
+	rel := pkgreg.Release{Name: "tool", Version: "1", URL: srv.URL + "/{target}", Targets: map[string]string{
+		"linux/amd64": "long.tar.gz", "windows/amd64": "long.zip",
+	}}
+	sums, files, err := Finder{HTTP: srv.Client()}.Inspect(t.Context(), rel, "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSums := map[string]string{"linux/amd64": sumOf(bodies["/long.tar.gz"]), "windows/amd64": sumOf(bodies["/long.zip"])}
+	if diff := cmp.Diff(wantSums, sums); diff != "" {
+		t.Errorf("sums (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(map[string][]archive.File{"linux/amd64": nil, "windows/amd64": nil}, files); diff != "" {
+		t.Errorf("files (-want +got):\n%s", diff)
+	}
+}

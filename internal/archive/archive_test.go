@@ -5,11 +5,14 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -219,11 +222,8 @@ func TestListErrors(t *testing.T) {
 
 func TestListBoundsNameMemory(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: long entry names are kept whole, so a small download fills memory", func(t *testing.T) {
+	t.Run("long entry names are rejected, so a small download cannot fill memory", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: archive/tar accepts names up to 1 MiB and List keeps each one; " +
-			"128 such entries are ~128 KiB of gzip and 128 MiB of retained names (100000 entries: ~100 GiB). " +
-			"List must reject over-long names or cap the bytes it keeps")
 		var buf bytes.Buffer
 		zw := gzip.NewWriter(&buf)
 		tw := tar.NewWriter(zw)
@@ -240,18 +240,40 @@ func TestListBoundsNameMemory(t *testing.T) {
 		if err := zw.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if files, err := archive.List(archive.TarGz, &buf); err == nil {
-			t.Errorf("List kept %d names of 1 MiB each, want an error", len(files))
+		if files, err := archive.List(archive.TarGz, &buf); !errors.Is(err, archive.ErrNameTooLong) {
+			t.Errorf("List = %d files, %v; want %v", len(files), err, archive.ErrNameTooLong)
+		}
+	})
+	t.Run("total name bytes are capped", func(t *testing.T) {
+		t.Parallel()
+		entries := make([]entry, 10)
+		for i := range entries {
+			entries[i] = entry{name: fmt.Sprintf("dir/file-%d", i), mode: 0o644}
+		}
+		l := archive.DefaultLimits()
+		l.MaxNameBytes = 50 // each name is 11 bytes
+		for kind, data := range map[archive.Kind][]byte{
+			archive.TarGz: tarGz(t, entries),
+			archive.Zip:   zipBytes(t, entries, true),
+		} {
+			if _, err := archive.ListLimits(kind, bytes.NewReader(data), l); !errors.Is(err, archive.ErrNamesTooLarge) {
+				t.Errorf("kind %v: ListLimits = %v, want %v", kind, err, archive.ErrNamesTooLarge)
+			}
+		}
+	})
+	t.Run("zip names over the length cap are rejected", func(t *testing.T) {
+		t.Parallel()
+		data := zipBytes(t, []entry{{name: strings.Repeat("a", 5000), mode: 0o644}}, true)
+		if _, err := archive.List(archive.Zip, bytes.NewReader(data)); !errors.Is(err, archive.ErrNameTooLong) {
+			t.Errorf("List = %v, want %v", err, archive.ErrNameTooLong)
 		}
 	})
 }
 
 func TestListZipNamesMatchChezmoi(t *testing.T) {
 	t.Parallel()
-	t.Run("xfail: backslashes in zip names are rewritten, chezmoi matches the raw name", func(t *testing.T) {
+	t.Run("backslashes in zip names are kept, chezmoi matches the raw name", func(t *testing.T) {
 		t.Parallel()
-		t.Skip("xfail: clean turns `d\\tool.exe` into `d/tool.exe`, but chezmoi's archive-file walk compares " +
-			"path.Clean of the raw zip name, so the proposed path is not found at apply time")
 		got, err := archive.List(archive.Zip, bytes.NewReader(zipBytes(t, []entry{{name: `d\tool.exe`, mode: 0o755}}, false)))
 		if err != nil {
 			t.Fatal(err)
@@ -260,4 +282,136 @@ func TestListZipNamesMatchChezmoi(t *testing.T) {
 			t.Errorf("List = %v, want %v (the name chezmoi matches)", got, want)
 		}
 	})
+}
+
+func TestListCapsDecompressedStream(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	const size = 1 << 20
+	if err := tw.WriteHeader(&tar.Header{Name: "big", Mode: 0o644, Typeflag: tar.TypeReg, Size: size}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(make([]byte, size)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	l := archive.DefaultLimits()
+	l.MaxDecompressed = size / 2
+	if _, err := archive.ListLimits(archive.TarGz, bytes.NewReader(buf.Bytes()), l); !errors.Is(err, archive.ErrTooLarge) {
+		t.Errorf("ListLimits = %v, want %v", err, archive.ErrTooLarge)
+	}
+	l.MaxDecompressed = 2 * size
+	got, err := archive.ListLimits(archive.TarGz, bytes.NewReader(buf.Bytes()), l)
+	if err != nil || len(got) != 1 {
+		t.Errorf("ListLimits under the cap = %v, %v; want one file", got, err)
+	}
+}
+
+func TestListZipLimits(t *testing.T) {
+	t.Parallel()
+	data := zipBytes(t, []entry{{name: "d/tool", mode: 0o755}, {name: "d/other", mode: 0o644}}, true)
+	t.Run("a zip over the spool cap is not listed", func(t *testing.T) {
+		t.Parallel()
+		l := archive.DefaultLimits()
+		l.MaxZipSpool = int64(len(data)) - 1
+		files, err := archive.ListLimits(archive.Zip, bytes.NewReader(data), l)
+		if !errors.Is(err, archive.ErrTooLarge) || files != nil {
+			t.Errorf("ListLimits = %v, %v; want nil, %v", files, err, archive.ErrTooLarge)
+		}
+		// An endless body must stop at the cap instead of filling the disk.
+		l.MaxZipSpool = 1 << 10
+		endless := readerFunc(func(p []byte) (int, error) { return len(p), nil })
+		if _, err := archive.ListLimits(archive.Zip, endless, l); !errors.Is(err, archive.ErrTooLarge) {
+			t.Errorf("ListLimits of an endless body = %v, want %v", err, archive.ErrTooLarge)
+		}
+		l.MaxZipSpool = int64(len(data)) - 1
+		l.MaxZipSpool = int64(len(data))
+		if files, err := archive.ListLimits(archive.Zip, bytes.NewReader(data), l); err != nil || len(files) != 2 {
+			t.Errorf("ListLimits at the cap = %v, %v; want 2 files", files, err)
+		}
+	})
+	t.Run("a central directory over the cap is refused", func(t *testing.T) {
+		t.Parallel()
+		l := archive.DefaultLimits()
+		l.MaxCentralDir = 10
+		if _, err := archive.ListLimits(archive.Zip, bytes.NewReader(data), l); !errors.Is(err, archive.ErrTooLarge) {
+			t.Errorf("ListLimits = %v, want %v", err, archive.ErrTooLarge)
+		}
+	})
+	t.Run("a declared central directory size is checked before it is read", func(t *testing.T) {
+		t.Parallel()
+		forged := bytes.Clone(data)
+		eocd := bytes.LastIndex(forged, []byte("PK\x05\x06"))
+		binary.LittleEndian.PutUint32(forged[eocd+12:], 1<<30) // the real directory is a few hundred bytes
+		// zip.NewReader would reject this as malformed; ErrTooLarge shows the check ran first.
+		if _, err := archive.List(archive.Zip, bytes.NewReader(forged)); !errors.Is(err, archive.ErrTooLarge) {
+			t.Errorf("List = %v, want %v", err, archive.ErrTooLarge)
+		}
+	})
+	t.Run("not a zip", func(t *testing.T) {
+		t.Parallel()
+		if _, err := archive.List(archive.Zip, bytes.NewReader([]byte("x"))); !errors.Is(err, zip.ErrFormat) {
+			t.Errorf("List = %v, want %v", err, zip.ErrFormat)
+		}
+	})
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
+
+// gateReader serves its data in two reads and makes the second wait for release.
+type gateReader struct {
+	data    []byte
+	started chan struct{} // closed on the first Read
+	release chan struct{} // the second Read waits on it
+	reads   int
+}
+
+func (g *gateReader) Read(p []byte) (int, error) {
+	g.reads++
+	switch g.reads {
+	case 1:
+		close(g.started)
+		return copy(p, g.data[:1]), nil
+	case 2:
+		<-g.release
+		return copy(p, g.data[1:]), nil
+	}
+	return 0, io.EOF
+}
+
+func TestListSpoolsOneZipAtATime(t *testing.T) {
+	t.Parallel()
+	data := zipBytes(t, []entry{{name: "tool", mode: 0o755}}, true)
+	first := &gateReader{data: data, started: make(chan struct{}), release: make(chan struct{})}
+	second := &gateReader{data: data, started: make(chan struct{}), release: make(chan struct{})}
+	close(second.release)
+	done := make(chan error, 2)
+	go func() { _, err := archive.List(archive.Zip, first); done <- err }()
+	<-first.started
+	go func() { _, err := archive.List(archive.Zip, second); done <- err }()
+	select {
+	case <-second.started:
+		t.Fatal("a second zip started spooling while the first was still spooling")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(first.release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Errorf("List = %v", err)
+		}
+	}
+	select {
+	case <-second.started:
+	default:
+		t.Error("the second zip never spooled")
+	}
 }
