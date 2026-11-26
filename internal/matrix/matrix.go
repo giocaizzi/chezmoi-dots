@@ -370,6 +370,10 @@ func Build(ctx context.Context, cz *chez.Client, src, scratch string, spec Spec)
 	if err != nil {
 		return nil, fmt.Errorf("read config template: %w", err)
 	}
+	machine, err := cz.ConfigData(ctx)
+	if err != nil {
+		return nil, err
+	}
 	data := map[string]map[string]any{}
 	for _, role := range Roles() {
 		seedPath := filepath.Join(scratch, "seed-"+role+".toml")
@@ -389,10 +393,6 @@ func Build(ctx context.Context, cz *chez.Client, src, scratch string, spec Spec)
 			return nil, err
 		}
 		data[role] = got
-	}
-	machine, err := cz.ConfigData(ctx)
-	if err != nil {
-		return nil, err
 	}
 	uniform(data, machine)
 	var entries []Entry
