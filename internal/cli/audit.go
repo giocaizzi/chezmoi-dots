@@ -77,7 +77,7 @@ func (d Deps) auditSecrets(ctx context.Context) error {
 	}
 	st.Table(d.Stdout, []string{"NAME", "KIND", "STATE", "DETAIL"}, rows)
 	for _, r := range results {
-		if r.State != vaultcheck.OK {
+		if r.State != vaultcheck.OK && r.Hint != "" {
 			fmt.Fprintf(d.Stdout, "  %s: %s\n", r.Name, r.Hint)
 		}
 	}
