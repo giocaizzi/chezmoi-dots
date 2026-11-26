@@ -76,7 +76,7 @@
 
    ```sh
    chmod +x chezmoi-dots_X.Y.Z_linux_amd64
-   ./chezmoi-dots_X.Y.Z_linux_amd64 version   # prints X.Y.Z
+   ./chezmoi-dots_X.Y.Z_linux_amd64 version   # prints chezmoi-dots X.Y.Z
    ```
 
 ## Update a dotfiles repository to the new release
@@ -109,6 +109,7 @@ The `{target}` values are the asset names without the `chezmoi-dots_<version>_` 
 chezmoi dots pkg bump chezmoi-dots
 chezmoi git -- diff        # review the new version and checksums
 chezmoi git -- commit -am "chore: bump chezmoi-dots"
+chezmoi git -- push
 chezmoi apply
 ```
 
