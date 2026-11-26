@@ -488,13 +488,21 @@ func TestMatrixReview(t *testing.T) {
 func TestConfigTemplateFormats(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name, file, text, probe, want, notWant string
+		name, file, text, probe, want, notWant, xfail string
 	}{
 		{
 			name: "yaml", file: ".chezmoi.yaml.tmpl",
 			text:  "data:\n  fromTemplate: yaml-{{ .chezmoi.os }}\n",
 			probe: `{{ if eq (get . "fromTemplate" | default "") "yaml-linux" }}{ broken{{ end }}`,
 			want:  "(linux/default)", notWant: "(darwin/",
+		},
+		{
+			// chezmoi init reads .chezmoi.yml.tmpl and writes chezmoi.yml.
+			name: "yml", file: ".chezmoi.yml.tmpl",
+			text:  "data:\n  fromTemplate: yml-{{ .chezmoi.os }}\n",
+			probe: `{{ if eq (get . "fromTemplate" | default "") "yml-linux" }}{ broken{{ end }}`,
+			want:  "(linux/default)", notWant: "(darwin/",
+			xfail: ".chezmoi.yml.tmpl is not read, so the source is treated as having no config template",
 		},
 		{
 			name: "json", file: ".chezmoi.json.tmpl",
@@ -516,6 +524,9 @@ func TestConfigTemplateFormats(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			if tt.xfail != "" {
+				t.Skip("xfail: " + tt.xfail)
+			}
 			e := newEnv(t)
 			if tt.name == "none" {
 				e.writeFile(t, ".chezmoidata/matrix.toml", matrixDeclaration)
