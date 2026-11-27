@@ -2,6 +2,7 @@ package term
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -157,5 +158,60 @@ func TestOverviewTable_ManyProfiles(t *testing.T) {
 		"  git                   ■ ■ ■ ■ ■ ■  ■ ■ ■ ■ ■ ■  ■ ■ ■ ■ ■ ■  1 target\n"
 	if diff := cmp.Diff(want, buf.String()); diff != "" {
 		t.Errorf("OverviewTable() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestOverviewTable_EntryWidth(t *testing.T) {
+	t.Parallel()
+	long22 := strings.Repeat("a", 22)
+	long30 := strings.Repeat("b", 30)
+	tests := []struct {
+		name  string
+		style Style
+		entry string
+		want  string
+	}{
+		{
+			name:  "22 chars widens by the gap",
+			entry: long22,
+			want: "  ENTRY                   DARWIN    LINUX     WINDOWS   TARGETS\n" +
+				"  " + long22 + "  ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n" +
+				"  short                   ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n",
+		},
+		{
+			name:  "30 chars",
+			entry: long30,
+			want: "  ENTRY                           DARWIN    LINUX     WINDOWS   TARGETS\n" +
+				"  " + long30 + "  ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n" +
+				"  short                           ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n",
+		},
+		{
+			name:  "cjk counts two cells per rune",
+			entry: "設定ファイル",
+			want: "  ENTRY                 DARWIN    LINUX     WINDOWS   TARGETS\n" +
+				"  設定ファイル          ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n" +
+				"  short                 ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n",
+		},
+		{
+			name:  "colored",
+			style: Style{M: "\x1b[35m", O: "\x1b[0m"},
+			entry: long30,
+			want: "  ENTRY                           DARWIN    LINUX     WINDOWS   TARGETS\n" +
+				"  \x1b[35m" + long30 + "\x1b[0m  ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n" +
+				"  \x1b[35mshort\x1b[0m                           ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var buf bytes.Buffer
+			row := func(e string) OverviewRow {
+				return OverviewRow{Entry: e, Darwin: "■ ■ ■", Linux: "■ ■ ■", Windows: "■ ■ ■", Targets: "t"}
+			}
+			tt.style.OverviewTable(&buf, 3, []OverviewRow{row(tt.entry), row("short")})
+			if diff := cmp.Diff(tt.want, buf.String()); diff != "" {
+				t.Errorf("OverviewTable() mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

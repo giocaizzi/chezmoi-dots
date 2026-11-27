@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
-// Width is the number of runes s shows on screen, ignoring ANSI escapes.
+// Width is the number of terminal cells s occupies, ignoring ANSI escapes. East
+// Asian wide runes take two cells; combining marks and zero-width joiners and
+// variation selectors take none.
 func Width(s string) int {
 	w := 0
 	for i := 0; i < len(s); {
@@ -19,11 +22,33 @@ func Width(s string) int {
 			i = j + 1
 			continue
 		}
-		_, size := utf8.DecodeRuneInString(s[i:])
+		r, size := utf8.DecodeRuneInString(s[i:])
 		i += size
-		w++
+		w += runeWidth(r)
 	}
 	return w
+}
+
+// wideRanges are the inclusive rune ranges that take two terminal cells.
+var wideRanges = [][2]rune{
+	{0x1100, 0x115F}, {0x2E80, 0x303E}, {0x3041, 0x33FF}, {0x3400, 0x4DBF},
+	{0x4E00, 0x9FFF}, {0xA000, 0xA4CF}, {0xAC00, 0xD7A3}, {0xF900, 0xFAFF},
+	{0xFE30, 0xFE4F}, {0xFF00, 0xFF60}, {0xFFE0, 0xFFE6}, {0x1F300, 0x1F64F},
+	{0x1F900, 0x1F9FF}, {0x20000, 0x2FFFD}, {0x30000, 0x3FFFD},
+}
+
+func runeWidth(r rune) int {
+	switch {
+	case r == 0x200D, r >= 0xFE00 && r <= 0xFE0F,
+		unicode.Is(unicode.Mn, r), unicode.Is(unicode.Me, r):
+		return 0
+	}
+	for _, rg := range wideRanges {
+		if r >= rg[0] && r <= rg[1] {
+			return 2
+		}
+	}
+	return 1
 }
 
 // Pad right-pads s with spaces to width visible columns.
