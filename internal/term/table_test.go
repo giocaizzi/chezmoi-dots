@@ -37,6 +37,18 @@ func TestWidth(t *testing.T) {
 		{name: "byte order mark", in: "a\ufeffb", want: 2},
 		{name: "ambiguous diamond", in: "◇", want: 1},
 		{name: "ambiguous cross", in: "✗", want: 1},
+		{name: "trigram", in: "\u2630", want: 2},
+		{name: "yijing hexagram", in: "\u4dc0", want: 2},
+		{name: "hangul jamo extended-A", in: "\ua960", want: 2},
+		{name: "vertical form", in: "\ufe10", want: 2},
+		{name: "small form", in: "\ufe50", want: 2},
+		{name: "tangut", in: "\U00017000", want: 2},
+		{name: "tangut components", in: "\U00018800", want: 2},
+		{name: "kana supplement", in: "\U0001B000", want: 2},
+		{name: "nushu", in: "\U0001B170", want: 2},
+		{name: "tai xuan jing", in: "\U0001D300", want: 2},
+		{name: "ambiguous parenthesized ideograph", in: "\u3248", want: 1},
+		{name: "circled number on black square", in: "\u3250", want: 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
