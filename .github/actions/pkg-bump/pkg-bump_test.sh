@@ -25,12 +25,6 @@ rejects() {
   if env "${envs[@]}" "$script" "$@" > "$root/out" 2>&1; then fail "$n"; return; fi
   if grep -qF -- "$msg" "$root/out"; then pass "$n"; else fail "$n: output lacks '$msg'"; fi
 }
-# xfail <name> <command...>: a known bug, strict. Expected to fail; a pass fails the suite so the
-# fix removes the marker and turns the line into a check.
-xfail() {
-  local n=$1; shift
-  if "$@"; then echo "XPASS $n: fixed, turn this xfail into a check"; fails=$((fails + 1)); else echo "xfail $n"; fi
-}
 
 # Fake gh: logs argv, answers the calls pr makes. FAKE_GH_PRS, a JSON list of open PRs as the API
 # returns them for the head branch name (any repository), is filtered with the caller's -q expression.
@@ -86,8 +80,8 @@ check "install: production download uses the release URL" grep -qF "https://gith
 env "${curl_env[@]}" "PKG_BUMP_DOWNLOAD_BASE=file://$root/dl" "$script" install > "$root/out" 2>&1
 check "install: the test override also allows file" grep -qF -- "--proto =https,file --proto-redir =https,file" "$root/curl.log"
 # The override comes from the environment, so a workflow or job env: (or GITHUB_ENV) reaches it; the
-# install step should pin it empty.
-xfail "action: install step pins PKG_BUMP_DOWNLOAD_BASE empty" grep -qE '^ +PKG_BUMP_DOWNLOAD_BASE: ""$' "$(dirname "$script")/action.yml"
+# install step pins it empty.
+check "action: install step pins PKG_BUMP_DOWNLOAD_BASE empty" grep -qE '^ +PKG_BUMP_DOWNLOAD_BASE: ""$' "$(dirname "$script")/action.yml"
 
 # --- install ---
 version=0.4.1

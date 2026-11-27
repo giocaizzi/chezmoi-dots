@@ -42,6 +42,7 @@ runs:
       shell: bash
       env:
         PKG_BUMP_VERSION: ${{ inputs.version }}
+        PKG_BUMP_DOWNLOAD_BASE: ""
       run: '"$GITHUB_ACTION_PATH/pkg-bump.sh" install'
     - name: Bump pins
       shell: bash
