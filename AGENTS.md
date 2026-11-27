@@ -28,6 +28,7 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `internal/tree/` — Composition tree of a source file (includes, symlink targets, data files).
 - `internal/udiff/` — Unified diffs of two texts.
 - `internal/chez/` — Chezmoi client abstraction and execution wrapper.
+- `.github/actions/pkg-bump/` — Reusable composite action: installs pinned chezmoi-dots and chezmoi, runs `pkg bump` and opens or updates a PR ([docs/bump-action.md](docs/bump-action.md)); shares `.github/actions/setup-chezmoi/install-chezmoi.sh`.
 - `internal/term/` — Terminal styling, Catppuccin themes, and inventory tables.
 
 ## Principles & Public Repository Integrity
@@ -42,6 +43,7 @@ The developer companion plugin for [chezmoi](https://www.chezmoi.io/) (`chezmoi-
 - `make check` — Run linter and tests with race detection (`check: lint test`).
 - `make lint` — Check `go mod tidy`, then run `golangci-lint` for Linux, macOS and Windows.
 - `make test` — Run unit and integration tests with `go test -race -shuffle=on ./...`.
+- `make test-action` — Hermetic tests of the pkg-bump action script (`lint` also runs `shellcheck` on the action scripts).
 - `make check-fast` — Run tests without the race detector.
 - `make test-help` — Run the focused help regression tests (from `help-tests.mk`).
 - `make test-help-goldens` — Regenerate the help golden files.

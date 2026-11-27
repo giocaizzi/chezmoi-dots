@@ -10,6 +10,7 @@ Source of truth for decisions, architecture and runbooks of this repo.
 - [Edit registry](edit-registry.md): `.chezmoidata/edit.toml` keys, lint findings and the coverage rule.
 - [Alias registry](alias-registry.md): the `alias`, `aliasBlock` and `aliasExternal` data, lint findings and what `audit aliases` reads.
 - [Release chezmoi-dots](release.md): runbook for tagging and publishing a version, verifying it, and bumping it in a dotfiles repository.
+- [Bump pinned releases from GitHub Actions](bump-action.md): runbook for the reusable `pkg-bump` action that opens a pull request when a pin is outdated.
 - [Build and install locally](local-build-install.md): checks, build, optional installation, verification and rollback.
 
 ## Apply and publish source edits
