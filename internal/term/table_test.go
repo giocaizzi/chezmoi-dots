@@ -12,10 +12,9 @@ import (
 func TestWidth(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name  string
-		in    string
-		want  int
-		xfail string
+		name string
+		in   string
+		want int
 	}{
 		{name: "plain", in: "abc", want: 3},
 		{name: "colored", in: "\x1b[1;34mabc\x1b[0m", want: 3},
@@ -28,16 +27,20 @@ func TestWidth(t *testing.T) {
 		{name: "zero width joiner", in: "a\u200db", want: 2},
 		{name: "variation selector", in: "■\ufe0f", want: 1},
 		{name: "ambiguous symbols", in: "■ □ · ◇", want: 7},
-		{name: "xfail: emoji outside the wide ranges", in: "\U0001F680", want: 2, xfail: "U+1F680-1F6FF and U+1FA70-1FAFF are wide but not in wideRanges"},
-		{name: "xfail: emoji presentation symbol", in: "✅", want: 2, xfail: "Emoji_Presentation symbols in U+2600-27BF are wide but not in wideRanges"},
-		{name: "xfail: zero width space", in: "a\u200bb", want: 2, xfail: "format characters (Cf) such as U+200B take no cell but count as one"},
+		{name: "emoji outside the wide ranges", in: "\U0001F680", want: 2},
+		{name: "emoji presentation symbol", in: "✅", want: 2},
+		{name: "zero width space", in: "a\u200bb", want: 2},
+		{name: "test tube", in: "🧪", want: 2},
+		{name: "extended pictographs", in: "\U0001FA90", want: 2},
+		{name: "watch", in: "⌚", want: 2},
+		{name: "word joiner", in: "a\u2060b", want: 2},
+		{name: "byte order mark", in: "a\ufeffb", want: 2},
+		{name: "ambiguous diamond", in: "◇", want: 1},
+		{name: "ambiguous cross", in: "✗", want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if tt.xfail != "" {
-				t.Skip("xfail: " + tt.xfail)
-			}
 			if got := term.Width(tt.in); got != tt.want {
 				t.Errorf("Width(%q) = %d, want %d", tt.in, got, tt.want)
 			}
