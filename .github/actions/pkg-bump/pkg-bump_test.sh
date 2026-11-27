@@ -5,6 +5,8 @@ set -uo pipefail
 script=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/pkg-bump.sh
 root=$(mktemp -d)
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+# CI runs this suite on a pull_request event: the script would refuse every test.
+unset GITHUB_EVENT_NAME
 trap 'rm -rf "$root"' EXIT
 fails=0
 token=ghs_TESTTOKEN_must_never_leak
