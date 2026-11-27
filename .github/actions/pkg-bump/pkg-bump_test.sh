@@ -15,13 +15,21 @@ pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
 # check <name> <command...>: passes when the command succeeds.
 check() { local n=$1; shift; if "$@"; then pass "$n"; else fail "$n"; fi; }
-# rejects <name> <env...> -- <subcommand>: passes when the script exits non-zero.
+# rejects <name> <message> <env...> -- <subcommand>: passes when the script exits non-zero with
+# <message> in its output, so a guard is only credited for its own refusal, not an unrelated error.
 rejects() {
-  local n=$1; shift
+  local n=$1 msg=$2; shift 2
   local -a envs=()
   while [ "$1" != -- ]; do envs+=("$1"); shift; done
   shift
-  if env "${envs[@]}" "$script" "$@" > "$root/out" 2>&1; then fail "$n"; else pass "$n"; fi
+  if env "${envs[@]}" "$script" "$@" > "$root/out" 2>&1; then fail "$n"; return; fi
+  if grep -qF -- "$msg" "$root/out"; then pass "$n"; else fail "$n: output lacks '$msg'"; fi
+}
+# xfail <name> <command...>: a known bug, strict. Expected to fail; a pass fails the suite so the
+# fix removes the marker and turns the line into a check.
+xfail() {
+  local n=$1; shift
+  if "$@"; then echo "XPASS $n: fixed, turn this xfail into a check"; fails=$((fails + 1)); else echo "xfail $n"; fi
 }
 
 # Fake gh: logs argv, answers the calls pr makes. FAKE_GH_PRS, a JSON list of open PRs as the API
@@ -47,20 +55,39 @@ EOF
 chmod +x "$root/bin/gh" "$root/bin/chezmoi-dots"
 
 # --- validation ---
-rejects "version: empty rejected" PKG_BUMP_VERSION= -- install
-rejects "version: injection rejected" 'PKG_BUMP_VERSION=1.2.3; rm -rf /' -- install
-rejects "version: two parts rejected" PKG_BUMP_VERSION=1.2 -- install
-rejects "install: unsupported runner" PKG_BUMP_VERSION=0.4.1 RUNNER_OS=Windows RUNNER_ARCH=X64 -- install
-rejects "name: bad name rejected" PKG_BUMP_SOURCE=. "PKG_BUMP_NAMES=ok \$(id)" GITHUB_WORKSPACE="$root" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" -- bump
-rejects "name: leading dash rejected" PKG_BUMP_SOURCE=. PKG_BUMP_NAMES='--evil' GITHUB_WORKSPACE="$root" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" -- bump
-rejects "event: pull_request refused" GITHUB_EVENT_NAME=pull_request PKG_BUMP_VERSION=0.4.1 RUNNER_OS=Linux RUNNER_ARCH=X64 -- install
-check "event: pull_request message" grep -q 'does not run on pull_request events' "$root/out"
-rejects "event: pull_request_target refused" GITHUB_EVENT_NAME=pull_request_target -- bump
-rejects "branch: refs/ prefix rejected" PKG_BUMP_VERSION=0.4.1 PKG_BUMP_BRANCH=refs/heads/x PKG_BUMP_TITLE=t GITHUB_WORKSPACE="$root" GITHUB_OUTPUT="$root/o" -- pr
-rejects "source: parent dir rejected" PKG_BUMP_SOURCE=../x GITHUB_WORKSPACE="$root" -- bump
-for b in '-x' 'a..b' 'a b' 'a;b' '/a' 'a/' 'x.lock'; do
-  rejects "branch: '$b' rejected" PKG_BUMP_VERSION=0.4.1 "PKG_BUMP_BRANCH=$b" PKG_BUMP_TITLE=t GITHUB_WORKSPACE="$root" GITHUB_OUTPUT="$root/o" -- pr
+for v in '' '1.2.3; rm -rf /' 1.2 '-v1.2.3'; do
+  rejects "version: '$v' rejected" 'invalid version' "PKG_BUMP_VERSION=$v" RUNNER_OS=Linux RUNNER_ARCH=X64 -- install
 done
+rejects "install: unsupported runner" 'unsupported runner' PKG_BUMP_VERSION=0.4.1 RUNNER_OS=Windows RUNNER_ARCH=X64 -- install
+rejects "name: bad name rejected" 'invalid pin name' PKG_BUMP_SOURCE=. "PKG_BUMP_NAMES=ok \$(id)" GITHUB_WORKSPACE="$root" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" -- bump
+rejects "name: leading dash rejected" 'invalid pin name' PKG_BUMP_SOURCE=. PKG_BUMP_NAMES='--evil' GITHUB_WORKSPACE="$root" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" -- bump
+rejects "name: leading dash on a later line rejected" 'invalid pin name' PKG_BUMP_SOURCE=. "PKG_BUMP_NAMES=ok"$'\n'"-x" GITHUB_WORKSPACE="$root" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" -- bump
+for e in pull_request pull_request_target; do
+  rejects "event: $e refused" 'does not run on pull_request events' "GITHUB_EVENT_NAME=$e" PKG_BUMP_VERSION=0.4.1 RUNNER_OS=Linux RUNNER_ARCH=X64 -- install
+done
+for s in ../x a/../b /abs 'a b'; do
+  rejects "source: '$s' rejected" 'invalid source-dir' "PKG_BUMP_SOURCE=$s" GITHUB_WORKSPACE="$root" -- bump
+done
+for b in '-x' 'a..b' 'a b' 'a;b' '/a' 'a/' 'x.lock' 'refs/heads/x'; do
+  rejects "branch: '$b' rejected" 'invalid branch' PKG_BUMP_VERSION=0.4.1 "PKG_BUMP_BRANCH=$b" PKG_BUMP_TITLE=t GITHUB_WORKSPACE="$root" GITHUB_OUTPUT="$root/o" -- pr
+done
+
+# Downloads are https-only (redirects included) unless the test override is set. A fake curl logs
+# its argv and fails, so nothing reaches the network.
+mkdir -p "$root/curlbin" "$root/tmp"
+printf '#!/usr/bin/env bash\necho "curl $*" >> "%s"\nexit 22\n' "$root/curl.log" > "$root/curlbin/curl"
+chmod +x "$root/curlbin/curl"
+curl_env=(PKG_BUMP_VERSION=0.4.1 RUNNER_OS=Linux RUNNER_ARCH=X64 RUNNER_TEMP="$root/tmp" GITHUB_PATH="$root/path" PATH="$root/curlbin:$PATH")
+: > "$root/curl.log"
+env -u PKG_BUMP_DOWNLOAD_BASE "${curl_env[@]}" "$script" install > "$root/out" 2>&1
+check "install: production download is https-only" grep -qF -- "--proto =https --proto-redir =https --retry 3 -o $root/tmp/" "$root/curl.log"
+check "install: production download uses the release URL" grep -qF "https://github.com/giocaizzi/chezmoi-dots/releases/download/v0.4.1/chezmoi-dots_0.4.1_linux_amd64" "$root/curl.log"
+: > "$root/curl.log"
+env "${curl_env[@]}" "PKG_BUMP_DOWNLOAD_BASE=file://$root/dl" "$script" install > "$root/out" 2>&1
+check "install: the test override also allows file" grep -qF -- "--proto =https,file --proto-redir =https,file" "$root/curl.log"
+# The override comes from the environment, so a workflow or job env: (or GITHUB_ENV) reaches it; the
+# install step should pin it empty.
+xfail "action: install step pins PKG_BUMP_DOWNLOAD_BASE empty" grep -qE '^ +PKG_BUMP_DOWNLOAD_BASE: ""$' "$(dirname "$script")/action.yml"
 
 # --- install ---
 version=0.4.1
@@ -76,13 +103,11 @@ check "install: good checksum accepted" env "${install_env[@]}" "$script" instal
 check "install: binary on PATH file and runnable" bash -c "[ -x \"\$(head -n1 '$root/path')/chezmoi-dots\" ]"
 
 echo tampered >> "$dl/$asset"
-rejects "install: tampered binary rejected" "${install_env[@]}" -- install
-check "install: mismatch message" grep -q 'checksum mismatch' "$root/out"
+rejects "install: tampered binary rejected" 'checksum mismatch' "${install_env[@]}" -- install
 
 grep -v "$asset" "$dl/checksums.txt" > "$dl/c2" || true
 mv "$dl/c2" "$dl/checksums.txt"
-rejects "install: missing checksums line rejected" "${install_env[@]}" -- install
-check "install: missing line message" grep -q 'no checksum for' "$root/out"
+rejects "install: missing checksums line rejected" 'no checksum for' "${install_env[@]}" -- install
 
 # --- bump ---
 ws="$root/ws"
@@ -95,6 +120,9 @@ check "bump: args, dry-run and source dir" grep -qF "chezmoi-dots pkg bump --dry
 : > "$root/dots.log"
 env PKG_BUMP_SOURCE=home "PKG_BUMP_NAMES=alpha"$'\n'"beta" GITHUB_WORKSPACE="$ws" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" "$script" bump > "$root/out" 2>&1
 check "bump: newline-separated names all reach pkg bump" grep -qF "chezmoi-dots pkg bump alpha beta source=" "$root/dots.log"
+: > "$root/dots.log"
+env PKG_BUMP_SOURCE=home "PKG_BUMP_NAMES= "$'\n\t' GITHUB_WORKSPACE="$ws" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" "$script" bump > "$root/out" 2>&1
+check "bump: blank names bump every pin" grep -qx "chezmoi-dots pkg bump source=$ws/home token=none" "$root/dots.log"
 
 # --- pr ---
 
@@ -122,6 +150,11 @@ check "pr: no changes without a PR prints no notice" test -z "$(grep '^::notice:
 env "${pr_env[@]}" "FAKE_GH_PRS=[{\"url\":\"https://example.test/example/harness/pull/5\",\"isCrossRepository\":false}]" "$script" pr > "$root/out" 2>&1
 check "pr: no changes notices an open PR" grep -q '^::notice::.*pull/5.*stale' "$root/out"
 check "pr: no changes does not edit the open PR" test -z "$(grep -E 'gh pr (create|edit)' "$root/gh.log" || true)"
+# A real dry run always lands here (pkg bump --dry-run writes nothing): it makes no gh call at all.
+: > "$root/gh.log"; : > "$root/gh_out"
+env "${pr_env[@]}" PKG_BUMP_DRY_RUN=true "FAKE_GH_PRS=[{\"url\":\"https://example.test/example/harness/pull/5\",\"isCrossRepository\":false}]" "$script" pr > "$root/out" 2>&1
+check "pr: dry run with nothing changed reports no change" grep -qx 'changed=false' "$root/gh_out"
+check "pr: dry run with nothing changed makes no gh call" test ! -s "$root/gh.log"
 : > "$root/gh.log"
 
 echo "version = 2" > "$repo/pins.toml"
@@ -186,11 +219,10 @@ echo "version = 6" > "$repo/pins.toml"
 : > "$root/gh.log"
 env "${pr_env[@]}" PKG_BUMP_BRANCH=main "$script" pr > "$root/out" 2>&1
 check "pr: branch equal to the default branch never force-pushes it" git -C "$origin" merge-base --is-ancestor "$merged" refs/heads/main
-rejects "pr: branch equal to the default branch exits non-zero" "${pr_env[@]}" PKG_BUMP_BRANCH=main -- pr
-check "pr: branch equal to the default branch says why" grep -q "is the base or the default branch" "$root/out"
+rejects "pr: branch equal to the default branch refused with a reason" 'is the base or the default branch' "${pr_env[@]}" PKG_BUMP_BRANCH=main -- pr
 check "pr: branch equal to the default branch makes no PR" test -z "$(grep -E 'gh pr (create|edit)' "$root/gh.log" || true)"
-rejects "pr: branch equal to an explicit base rejected" "${pr_env[@]}" PKG_BUMP_BRANCH=release PKG_BUMP_BASE=release -- pr
-rejects "pr: branch equal to the default branch rejected with another base" "${pr_env[@]}" PKG_BUMP_BRANCH=main PKG_BUMP_BASE=release -- pr
+rejects "pr: branch equal to an explicit base rejected" 'is the base or the default branch' "${pr_env[@]}" PKG_BUMP_BRANCH=release PKG_BUMP_BASE=release -- pr
+rejects "pr: branch equal to the default branch rejected with another base" 'is the base or the default branch' "${pr_env[@]}" PKG_BUMP_BRANCH=main PKG_BUMP_BASE=release -- pr
 
 # A tracked file changed outside source-dir is neither committed nor a change.
 git -C "$repo" checkout -q -- pins.toml
