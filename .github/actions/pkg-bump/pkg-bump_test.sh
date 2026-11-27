@@ -13,6 +13,12 @@ pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
 # check <name> <command...>: passes when the command succeeds.
 check() { local n=$1; shift; if "$@"; then pass "$n"; else fail "$n"; fi; }
+# xfail <name> <command...>: a known bug, strict. Expected to fail; a pass fails the suite so the
+# fix removes the marker and turns the line into a check.
+xfail() {
+  local n=$1; shift
+  if "$@"; then echo "XPASS $n: fixed, turn this xfail into a check"; fails=$((fails + 1)); else echo "xfail $n"; fi
+}
 # rejects <name> <env...> -- <subcommand>: passes when the script exits non-zero.
 rejects() {
   local n=$1; shift
@@ -22,14 +28,17 @@ rejects() {
   if env "${envs[@]}" "$script" "$@" > "$root/out" 2>&1; then fail "$n"; else pass "$n"; fi
 }
 
-# Fake gh: logs argv, answers the calls pr makes.
+# Fake gh: logs argv, answers the calls pr makes. FAKE_GH_PRS, a JSON list of open PRs as the API
+# returns them for the head branch name, is filtered with the caller's -q expression.
 mkdir -p "$root/bin"
 cat > "$root/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 echo "gh $*" >> "$FAKE_GH_LOG"
+q=; prev=
+for a in "$@"; do [ "$prev" = -q ] && q=$a; prev=$a; done
 case "$1 $2" in
   "repo view") echo main ;;
-  "pr list") echo "${FAKE_GH_EXISTING:-}" ;;
+  "pr list") if [ -n "${FAKE_GH_PRS:-}" ]; then jq -r "$q // empty" <<< "$FAKE_GH_PRS"; else echo "${FAKE_GH_EXISTING:-}"; fi ;;
   "pr create") echo "https://example.test/example/harness/pull/7" ;;
 esac
 exit 0
@@ -80,6 +89,11 @@ mkdir -p "$ws/home"
 : > "$root/dots.log"
 env PKG_BUMP_SOURCE=home PKG_BUMP_NAMES='alpha  beta/x' PKG_BUMP_DRY_RUN=true GITHUB_WORKSPACE="$ws" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" GH_TOKEN=$token "$script" bump > "$root/out" 2>&1
 check "bump: args, dry-run and source dir" grep -qF "chezmoi-dots pkg bump --dry-run alpha beta/x source=$ws/home" "$root/dots.log"
+
+# A YAML block (names: |) separates pins by newlines; read -a stops at the first one.
+: > "$root/dots.log"
+env PKG_BUMP_SOURCE=home "PKG_BUMP_NAMES=alpha"$'\n'"beta" GITHUB_WORKSPACE="$ws" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" "$script" bump > "$root/out" 2>&1
+xfail "bump: newline-separated names all reach pkg bump" grep -qF "chezmoi-dots pkg bump alpha beta source=" "$root/dots.log"
 
 # --- pr ---
 origin="$root/origin.git"
@@ -139,6 +153,29 @@ git -C "$repo" config http.https://example.test/.extraheader "AUTHORIZATION: bas
 env "${pr_env[@]}" "$script" pr > "$root/out" 2>&1
 check "pr: persisted credential warns" grep -q '^::warning::' "$root/out"
 check "token: absent from output with warning" test -z "$(grep -F "$token" "$root/out" || true)"
+git -C "$repo" config --unset http.https://example.test/.extraheader
+
+# gh pr list --head matches the branch name in any repository, so an open PR from a fork branch
+# named like the bump branch is returned: the action must not edit it and must open its own.
+echo "version = 5" > "$repo/pins.toml"
+: > "$root/gh.log"; : > "$root/gh_out"
+fork_pr='[{"url":"https://example.test/example/harness/pull/9","isCrossRepository":true,"headRepositoryOwner":{"login":"fork-owner"}}]'
+env "${pr_env[@]}" PKG_BUMP_BASE=main "FAKE_GH_PRS=$fork_pr" "$script" pr > "$root/out" 2>&1
+xfail "pr: a fork PR on the same branch name is not edited" test -z "$(grep 'gh pr edit https://example.test/example/harness/pull/9' "$root/gh.log" || true)"
+xfail "pr: a fork PR on the same branch name does not stop the PR" grep -q 'gh pr create' "$root/gh.log"
+
+# branch equal to the base (or default) branch: a commit merged on origin after the checkout must
+# survive; the force push drops it. The action must refuse before pushing.
+git -C "$repo" switch -q -C main origin/main
+other="$root/other"
+git clone -q -b main "$origin" "$other"
+git -C "$other" -c user.name=t -c user.email=t@example.test commit -q --allow-empty -m "merged meanwhile"
+git -C "$other" push -q origin main
+merged=$(git -C "$other" rev-parse HEAD)
+echo "version = 6" > "$repo/pins.toml"
+: > "$root/gh.log"
+env "${pr_env[@]}" PKG_BUMP_BRANCH=main "$script" pr > "$root/out" 2>&1
+xfail "pr: branch equal to the default branch never force-pushes it" git -C "$origin" merge-base --is-ancestor "$merged" refs/heads/main
 
 echo
 if [ "$fails" -ne 0 ]; then echo "$fails failure(s)"; exit 1; fi
