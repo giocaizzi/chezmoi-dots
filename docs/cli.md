@@ -165,6 +165,12 @@ selector, `--matrix` shows an overview across registry entries; without it a
 selector is required. `--as` cannot be combined with `--matrix`. How each
 configuration's data is produced is described in [matrix.md](matrix.md).
 
+The overview has one row per registry entry: the entry, one block of symbols per
+OS (one symbol per profile), and its targets. `■` reached, `□` unmanaged, `·`
+local folder, `◇` data only (a `.chezmoidata` entry no managed target reads; its
+data may still be read by scripts or the tool). The ENTRY column widens to the
+longest name.
+
 Options: `--as` (default empty/current machine), `--matrix` (false), `-h`,
 `--help`. Environment: shared chezmoi and output settings only.
 

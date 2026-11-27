@@ -3,6 +3,7 @@ package edit
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sync/errgroup"
@@ -61,10 +62,11 @@ func (s *Service) ViewOverview(ctx context.Context) error {
 	fmt.Fprintf(s.Out, "%s▸ matrix overview (%d configurations, profiles: %s)%s\n", s.Style.B, len(entries), strings.Join(legend, " · "), s.Style.O)
 	s.Style.OverviewTable(s.Out, len(profiles), rows)
 	fmt.Fprintf(s.Out, "\n  %sLegend:%s\n", s.Style.D, s.Style.O)
-	fmt.Fprintf(s.Out, "    %s%s%s reached   %s%s%s unmanaged   %s%s%s local folder\n",
+	fmt.Fprintf(s.Out, "    %s%s%s reached   %s%s%s unmanaged   %s%s%s local folder   %s%s%s data only\n",
 		s.Style.G, term.SymSquareFilled, s.Style.O,
 		s.Style.D, term.SymSquareEmpty, s.Style.O,
-		s.Style.D, term.SymDot, s.Style.O)
+		s.Style.D, term.SymDot, s.Style.O,
+		s.Style.D, term.SymDiamond, s.Style.O)
 	return nil
 }
 
@@ -119,6 +121,10 @@ func (s *Service) overviewRowForEntry(name, source string, managedList []configM
 	var desc string
 	switch len(allTargets) {
 	case 0:
+		if isDataSource(source) {
+			block := s.Style.D + strings.TrimSpace(strings.Repeat(term.SymDiamond+" ", len(profiles))) + s.Style.O
+			return term.OverviewRow{Entry: name, Darwin: block, Linux: block, Windows: block, Targets: "data only"}
+		}
 		desc = "nothing reached"
 	case 1:
 		desc = "1 target"
@@ -133,4 +139,14 @@ func (s *Service) overviewRowForEntry(name, source string, managedList []configM
 		Windows: windowsCol,
 		Targets: desc,
 	}
+}
+
+// isDataSource reports whether source is chezmoi data: a file under .chezmoidata/
+// or a root .chezmoidata.<ext> file.
+func isDataSource(source string) bool {
+	source = filepath.ToSlash(source)
+	if strings.HasPrefix(source, ".chezmoidata/") {
+		return true
+	}
+	return !strings.Contains(source, "/") && strings.HasPrefix(source, ".chezmoidata.")
 }

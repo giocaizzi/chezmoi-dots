@@ -85,3 +85,77 @@ func TestProfilesOf(t *testing.T) {
 		t.Errorf("profilesOf() (-want +got):\n%s", diff)
 	}
 }
+
+func TestViewOverviewDataOnly(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "a.md"}, st("1"))
+	reg, fs := registry.Parse(map[string]any{"edit": map[string]any{
+		"data":  map[string]any{"desc": "d", "source": ".chezmoidata/example.toml"},
+		"plain": map[string]any{"desc": "d", "source": "plain.md"},
+	}})
+	if len(fs) != 0 {
+		t.Fatal(fs)
+	}
+	r.svc.Registry = reg
+	r.svc.Matrix = func(context.Context, string) ([]matrix.Entry, error) { return entriesFor("work", "web"), nil }
+	var out bytes.Buffer
+	r.svc.Out = &out
+	if err := r.svc.ViewOverview(t.Context()); err != nil {
+		t.Fatalf("ViewOverview() = %v", err)
+	}
+	var seen int
+	for _, line := range strings.Split(out.String(), "\n") {
+		switch {
+		case strings.HasPrefix(line, "  data "):
+			seen++
+			if !strings.Contains(line, "◇ ◇") || !strings.HasSuffix(line, "data only") {
+				t.Errorf("data row = %q, want diamonds and %q", line, "data only")
+			}
+		case strings.HasPrefix(line, "  plain "):
+			seen++
+			if !strings.HasSuffix(line, "nothing reached") {
+				t.Errorf("plain row = %q, want %q", line, "nothing reached")
+			}
+		}
+	}
+	if seen != 2 {
+		t.Errorf("found %d of the 2 rows in:\n%s", seen, out.String())
+	}
+	if !strings.Contains(out.String(), "◇ data only") {
+		t.Errorf("legend lacks %q:\n%s", "◇ data only", out.String())
+	}
+}
+
+func TestIsDataSource(t *testing.T) {
+	t.Parallel()
+	tests := map[string]bool{
+		".chezmoidata/example.toml":     true,
+		".chezmoidata/sub/example.yaml": true,
+		".chezmoidata.toml":             true,
+		"dot_config/.chezmoidata.toml":  false,
+		"a.md":                          false,
+		".chezmoidata":                  false,
+	}
+	for src, want := range tests {
+		if got := isDataSource(src); got != want {
+			t.Errorf("isDataSource(%q) = %v, want %v", src, got, want)
+		}
+	}
+}
+
+func TestOverviewRowDataReached(t *testing.T) {
+	t.Parallel()
+	r := newRig(t, registry.Entry{Name: "a", Desc: "d", Source: "a.md"}, st("1"))
+	src := ".chezmoidata/example.toml"
+	entries := entriesFor("work")
+	index := map[string]int{}
+	managed := make([]configManaged, len(entries))
+	for i, e := range entries {
+		index[e.Label()] = i
+		managed[i] = configManaged{inverted: map[string][]string{src: {"/home/x/.gitconfig"}}}
+	}
+	row := r.svc.overviewRowForEntry("data", src, managed, index, []string{"work"})
+	if row.Targets != "1 target" || !strings.Contains(row.Darwin, "■") {
+		t.Errorf("row = %+v, want squares and %q", row, "1 target")
+	}
+}
