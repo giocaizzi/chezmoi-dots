@@ -10,7 +10,11 @@
 1. installs a pinned, checksum-verified `chezmoi` (the same install the CI of this repository uses);
 2. downloads the `chezmoi-dots` release named by `version` and checks it against the `checksums.txt` of the same release;
 3. runs `chezmoi-dots pkg bump` against `source-dir` (`CHEZMOI_SOURCE_DIR`, so `.chezmoiroot` is honoured). `pkg bump` needs no token: it reads releases through `chezmoi data`, `git ls-remote` and plain HTTPS downloads;
-4. if a pin changed, commits the tracked changes as `github-actions[bot]` on `branch`, force-pushes it, and opens a pull request, or updates the open one for that branch. When nothing changed it prints `all pins are up to date` and makes no pull request.
+4. if a pin changed, commits the tracked changes as `github-actions[bot]` on `branch`, force-pushes it, and opens a pull request, or updates the open one for that branch. When nothing changed it prints `all pins are up to date` and makes no pull request; if an open pull request from an earlier run is still on `branch`, it prints a `::notice::` with its URL (it may be stale: close it if the pins were bumped elsewhere) and leaves it untouched. A dry run makes no `gh` call.
+
+Only changes inside `source-dir` count: a tracked file changed elsewhere by an earlier step is neither committed nor makes `changed` true. Only a pull request from this repository is edited; a fork pull request on the same branch name is ignored and the action opens its own.
+
+The action refuses to run on `pull_request` and `pull_request_target` events: the checkout there is pull request code.
 
 Only the last step receives the token.
 
@@ -20,11 +24,11 @@ Only the last step receives the token.
 |---|---|---|
 | `version` | required | chezmoi-dots release to install, `0.4.1` or `v0.4.1`. Explicit on purpose: the run is reproducible and never trusts an unpinned download |
 | `source-dir` | `.` | Chezmoi source directory, relative to the workspace |
-| `names` | empty | Whitespace-separated pins to bump; empty bumps all. Each is limited to letters, digits, `.`, `_`, `/` and `-` |
+| `names` | empty | Pins to bump, separated by whitespace or newlines (a YAML block works); empty bumps all. Each is limited to letters, digits, `.`, `_`, `/` and `-` |
 | `dry-run` | `false` | `true` runs `pkg bump --dry-run`; it writes nothing, `changed` is `false` and no pull request is made; the step log lists what would move |
 | `token` | `${{ github.token }}` | Pushes the branch and opens the pull request |
-| `branch` | `chore/bump-releases` | Branch the changes are pushed to (force-pushed on every run) |
-| `base` | empty | Base branch; empty is the repository's default branch |
+| `branch` | `chore/bump-releases` | Branch the changes are pushed to (force-pushed on every run). Must differ from `base` and from the default branch, or the run fails before any commit |
+| `base` | empty | Base branch; empty is the repository's default branch. Must differ from `branch` |
 | `title` | `chore(deps): bump pinned releases` | Pull request title and commit message |
 
 | Output | Meaning |
@@ -48,9 +52,13 @@ on:
 permissions:
   contents: write
   pull-requests: write
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
 jobs:
   bump:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -70,11 +78,13 @@ Replace `<sha>` with the commit of the release tag (`gh api repos/giocaizzi/chez
 - With the `github.token` fallback, a pull request it opens does not trigger `pull_request` workflows (a GitHub rule). Start the checks by hand or close and reopen the pull request; prefer `BUMP_TOKEN`.
 - Set `persist-credentials: false` on the checkout. Otherwise the checkout leaves its own `GITHUB_TOKEN` in the git config and the push uses it instead of `token`; the action warns (`::warning::`) when it finds one. The push takes its credential from `gh auth git-credential` for that single command and writes nothing to the git config.
 - The token is passed to the pull request step as `GH_TOKEN` and is never printed.
+- Keep the job to the checkout and this action. Any earlier step that writes `GITHUB_PATH` or `GITHUB_ENV` can plant a `gh` or `git` that the token step then runs, so "only the pull request step receives the token" holds only in such a job. Never run the action from `pull_request` or `pull_request_target`; it refuses both.
 
 ## Supported runners and verification
 
 - Linux X64 and macOS ARM64, the platforms that both the releases and the pinned `chezmoi` hashes cover. Any other runner fails with a message.
-- The binary is checked against the `checksums.txt` published with the same release, by exact file name. A mismatch or a missing line fails the step.
+- Downloads accept `https` only, redirects included.
+- The binary is checked against the `checksums.txt` published with the same release, by exact file name. A mismatch or a missing line fails the step. `checksums.txt` comes from the same release as the binary, so it proves transfer integrity, not authenticity.
 - Build provenance attestations are not verified by the action. Check one by hand: `gh attestation verify chezmoi-dots_0.4.1_linux_amd64 --repo giocaizzi/chezmoi-dots`.
 
 ## Troubleshooting
@@ -85,6 +95,10 @@ Replace `<sha>` with the commit of the release tag (`gh api repos/giocaizzi/chez
 | `unsupported runner` | Use a Linux X64 or macOS ARM64 runner |
 | `no checksum for ...` or `checksum mismatch` | The release lacks that asset, or the download is corrupt: do not use it, check the release page |
 | `all pins are up to date` | Nothing to do |
+| `::notice::` that a pull request was left open | The pins were bumped elsewhere and the earlier bump pull request is stale: close it |
+| `does not run on pull_request events` | Trigger the workflow from `schedule` or `workflow_dispatch` |
+| `is the base or the default branch` | `branch` must be a dedicated branch, not `base` or the default branch |
+| A fork pull request on `branch` is not updated | By design: only a pull request from this repository is edited; the action opens its own |
 | `pkg bump` finds no registry | `source-dir` is not the chezmoi source directory (see `.chezmoiroot`) |
 | The pull request has no checks | It was opened with `github.token`; use `BUMP_TOKEN` |
 | Push is rejected as `github-actions[bot]` | The checkout persisted credentials, or the token lacks `contents: write` |
