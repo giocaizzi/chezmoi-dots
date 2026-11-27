@@ -27,7 +27,7 @@ Declarative registry-driven editing, package survey and drift detection, pin bum
 - **Zero-Config Fallback**: Works on any `chezmoi managed` repository without configuration—fuzzy pick and edit any managed target directly.
 - **Add & Register (`dots add`)**: Bring a new file under chezmoi and register it for editing in one step.
 - **Status Snapshot (`dots status`)**: See the dotfiles checkout (branch, ahead/behind, local changes) and what `chezmoi apply` would change, without touching the network.
-- **Package Survey & Pins (`dots pkg status`, `dots pkg bump`)**: Query Homebrew, Apt, winget, uv, npm, and GitHub Releases to detect version drift against your pins. Also tracks commit-pinned archive externals. Update pins with comment-preserving text edits.
+- **Package Survey & Pins (`dots pkg status`, `dots pkg bump`)**: Query Homebrew, Apt, winget, uv, npm, and GitHub Releases to detect version drift against your pins. Also tracks commit-pinned archive externals. Update pins with comment-preserving text edits, or on a schedule with the reusable [`pkg-bump` GitHub Action](docs/bump-action.md).
 - **Live Preview**: Editing can render live updates to a side pane using tmux or Windows Terminal; `live` is the internal pane command.
 - **Template Composition (`dots view`)**: Inspect a target's composition tree and rendered content, including previews across OS/profile configurations.
 - **Template Linting (`dots lint`)**: Verify template syntax, detect unrendered delimiters, and render shell, zsh, PowerShell and JSON templates for every OS/profile configuration and lint them.

@@ -1,0 +1,65 @@
+name: Bump pinned releases
+description: Run chezmoi-dots pkg bump on a chezmoi source directory and open or update a pull request with the result.
+inputs:
+  version:
+    description: chezmoi-dots release to install, such as 0.4.1 or v0.4.1. Keep it equal to the ref of this action.
+    required: true
+  source-dir:
+    description: Chezmoi source directory, relative to the workspace.
+    default: .
+  names:
+    description: Pins to bump, separated by whitespace or newlines. Empty bumps every pin.
+    default: ""
+  dry-run:
+    description: "true runs pkg bump --dry-run and never commits or opens a pull request."
+    default: "false"
+  token:
+    description: Token that pushes the branch and opens the pull request. Only the pull request step receives it.
+    default: ${{ github.token }}
+  branch:
+    description: Branch the changes are force-pushed to. Must differ from base and from the default branch.
+    default: chore/bump-releases
+  base:
+    description: Base branch of the pull request. Empty means the repository default branch. Must differ from branch.
+    default: ""
+  title:
+    description: Pull request title and commit message.
+    default: "chore(deps): bump pinned releases"
+outputs:
+  changed:
+    description: true when the bump changed a pin, false otherwise.
+    value: ${{ steps.pr.outputs.changed }}
+  pull-request-url:
+    description: URL of the opened or updated pull request, empty when none.
+    value: ${{ steps.pr.outputs.pull-request-url }}
+runs:
+  using: composite
+  steps:
+    - name: Install chezmoi
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/../setup-chezmoi/install-chezmoi.sh"'
+    - name: Install chezmoi-dots
+      shell: bash
+      env:
+        PKG_BUMP_VERSION: ${{ inputs.version }}
+        PKG_BUMP_DOWNLOAD_BASE: ""
+      run: '"$GITHUB_ACTION_PATH/pkg-bump.sh" install'
+    - name: Bump pins
+      shell: bash
+      env:
+        PKG_BUMP_SOURCE: ${{ inputs.source-dir }}
+        PKG_BUMP_NAMES: ${{ inputs.names }}
+        PKG_BUMP_DRY_RUN: ${{ inputs.dry-run }}
+      run: '"$GITHUB_ACTION_PATH/pkg-bump.sh" bump'
+    - name: Open or update the pull request
+      id: pr
+      shell: bash
+      env:
+        PKG_BUMP_VERSION: ${{ inputs.version }}
+        PKG_BUMP_SOURCE: ${{ inputs.source-dir }}
+        PKG_BUMP_DRY_RUN: ${{ inputs.dry-run }}
+        PKG_BUMP_BRANCH: ${{ inputs.branch }}
+        PKG_BUMP_BASE: ${{ inputs.base }}
+        PKG_BUMP_TITLE: ${{ inputs.title }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: '"$GITHUB_ACTION_PATH/pkg-bump.sh" pr'

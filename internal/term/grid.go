@@ -12,6 +12,7 @@ const (
 	SymSquareEmpty  = "□"
 	SymDot          = "·"
 	SymCross        = "✗"
+	SymDiamond      = "◇"
 )
 
 // Palette returns the distinct highlight colours for matrix preview diffs:
@@ -26,13 +27,13 @@ func (s Style) MatrixGrid(w io.Writer, profiles []string, short map[string]strin
 	oses := []string{"darwin", "linux", "windows"}
 	width := 1
 	for _, p := range profiles {
-		width = max(width, visibleWidth(short[p]))
+		width = max(width, Width(short[p]))
 	}
 
 	var h strings.Builder
 	fmt.Fprintf(&h, "%-12s", "")
 	for _, p := range profiles {
-		h.WriteString("  " + padRight(short[p], width))
+		h.WriteString("  " + Pad(short[p], width))
 	}
 	fmt.Fprintln(w, strings.TrimRight(h.String(), " "))
 	for _, osName := range oses {
@@ -45,7 +46,7 @@ func (s Style) MatrixGrid(w io.Writer, profiles []string, short map[string]strin
 			}
 			b.WriteString("  ")
 			if i < len(profiles)-1 {
-				glyph = padRight(glyph, width)
+				glyph = Pad(glyph, width)
 			}
 			b.WriteString(glyph)
 		}
@@ -66,7 +67,11 @@ type OverviewRow struct {
 // blocks hold one symbol for each of the given number of profiles.
 func (s Style) OverviewTable(w io.Writer, profiles int, rows []OverviewRow) {
 	width := max(10, 2*profiles+1)
-	header := "  " + padRight("ENTRY", 22) + padRight("DARWIN", width) + padRight("LINUX", width) + padRight("WINDOWS", width) + "TARGETS"
+	entryWidth := 22
+	for _, r := range rows {
+		entryWidth = max(entryWidth, Width(r.Entry)+2)
+	}
+	header := "  " + Pad("ENTRY", entryWidth) + Pad("DARWIN", width) + Pad("LINUX", width) + Pad("WINDOWS", width) + "TARGETS"
 	if s.D != "" {
 		fmt.Fprintf(w, "%s%s%s\n", s.D, header, s.O)
 	} else {
@@ -82,38 +87,11 @@ func (s Style) OverviewTable(w io.Writer, profiles int, rows []OverviewRow) {
 			targets = s.D + targets + s.O
 		}
 		fmt.Fprintf(w, "  %s%s%s%s%s\n",
-			padRight(entry, 22),
-			padRight(r.Darwin, width),
-			padRight(r.Linux, width),
-			padRight(r.Windows, width),
+			Pad(entry, entryWidth),
+			Pad(r.Darwin, width),
+			Pad(r.Linux, width),
+			Pad(r.Windows, width),
 			targets,
 		)
 	}
-}
-
-func visibleWidth(s string) int {
-	inEscape := false
-	w := 0
-	for _, r := range s {
-		if r == '\x1b' {
-			inEscape = true
-			continue
-		}
-		if inEscape {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inEscape = false
-			}
-			continue
-		}
-		w++
-	}
-	return w
-}
-
-func padRight(s string, width int) string {
-	vw := visibleWidth(s)
-	if vw >= width {
-		return s
-	}
-	return s + strings.Repeat(" ", width-vw)
 }

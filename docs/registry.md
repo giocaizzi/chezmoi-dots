@@ -98,7 +98,7 @@ Rules `lint packages` enforces, per release: `unknown key`, `version is required
 
 Any other URL still validates and pins, but its latest version is reported as unknown and `pkg bump` cannot update it.
 
-`pkg bump` rewrites only the `version` line and the `sha256` values of the release, as text: comments, order and everything else stay.
+`pkg bump` rewrites only the `version` line and the `sha256` values of the release, as text: comments, order and everything else stay. To run it on a schedule and get a pull request, use the [`pkg-bump` GitHub Action](bump-action.md).
 
 ## What your dotfiles provide
 
