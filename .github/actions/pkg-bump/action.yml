@@ -8,7 +8,7 @@ inputs:
     description: Chezmoi source directory, relative to the workspace.
     default: .
   names:
-    description: Whitespace-separated pins to bump. Empty bumps every pin.
+    description: Pins to bump, separated by whitespace or newlines. Empty bumps every pin.
     default: ""
   dry-run:
     description: "true runs pkg bump --dry-run and never commits or opens a pull request."
@@ -17,10 +17,10 @@ inputs:
     description: Token that pushes the branch and opens the pull request. Only the pull request step receives it.
     default: ${{ github.token }}
   branch:
-    description: Branch the changes are pushed to.
+    description: Branch the changes are force-pushed to. Must differ from base and from the default branch.
     default: chore/bump-releases
   base:
-    description: Base branch of the pull request. Empty means the repository default branch.
+    description: Base branch of the pull request. Empty means the repository default branch. Must differ from branch.
     default: ""
   title:
     description: Pull request title and commit message.
