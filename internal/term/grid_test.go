@@ -187,9 +187,9 @@ func TestOverviewTable_EntryWidth(t *testing.T) {
 		},
 		{
 			name:  "cjk counts two cells per rune",
-			entry: "設定ファイル",
+			entry: "設定ファイル", //nolint:gosmopolitan // wide runes are the case under test
 			want: "  ENTRY                 DARWIN    LINUX     WINDOWS   TARGETS\n" +
-				"  設定ファイル          ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n" +
+				"  設定ファイル          ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n" + //nolint:gosmopolitan // wide runes are the case under test
 				"  short                 ■ ■ ■     ■ ■ ■     ■ ■ ■     t\n",
 		},
 		{

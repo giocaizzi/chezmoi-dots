@@ -104,7 +104,7 @@ func TestViewOverviewDataOnly(t *testing.T) {
 		t.Fatalf("ViewOverview() = %v", err)
 	}
 	var seen int
-	for _, line := range strings.Split(out.String(), "\n") {
+	for line := range strings.SplitSeq(out.String(), "\n") {
 		switch {
 		case strings.HasPrefix(line, "  data "):
 			seen++

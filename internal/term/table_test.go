@@ -20,8 +20,8 @@ func TestWidth(t *testing.T) {
 		{name: "colored", in: "\x1b[1;34mabc\x1b[0m", want: 3},
 		{name: "multibyte", in: "$1 · #3", want: 7},
 		{name: "empty", in: "", want: 0},
-		{name: "cjk", in: "設定ファイル", want: 12},
-		{name: "cjk colored", in: "\x1b[35m設定\x1b[0m", want: 4},
+		{name: "cjk", in: "設定ファイル", want: 12},                   //nolint:gosmopolitan // wide runes are the case under test
+		{name: "cjk colored", in: "\x1b[35m設定\x1b[0m", want: 4}, //nolint:gosmopolitan // wide runes are the case under test
 		{name: "combining mark", in: "e\u0301", want: 1},
 		{name: "precomposed", in: "é", want: 1},
 		{name: "zero width joiner", in: "a\u200db", want: 2},
@@ -67,8 +67,8 @@ func TestTable(t *testing.T) {
 func TestTable_WideCell(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
-	term.Style{}.Table(&buf, []string{"NAME", "VALUE"}, [][]string{{"設定", "x"}, {"abcd", "y"}})
-	want := "  NAME  VALUE\n  設定  x\n  abcd  y\n"
+	term.Style{}.Table(&buf, []string{"NAME", "VALUE"}, [][]string{{"設定", "x"}, {"abcd", "y"}}) //nolint:gosmopolitan // wide runes are the case under test
+	want := "  NAME  VALUE\n  設定  x\n  abcd  y\n"                                               //nolint:gosmopolitan // wide runes are the case under test
 	if diff := cmp.Diff(want, buf.String()); diff != "" {
 		t.Errorf("Table() mismatch (-want +got):\n%s", diff)
 	}
