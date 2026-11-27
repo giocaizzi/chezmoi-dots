@@ -85,11 +85,13 @@ cmd_pr() {
     echo "all pins are up to date"
     return 0
   fi
-  set_output changed true
+  # pkg bump --dry-run writes nothing, so a change here was not made by it.
   if [ "${PKG_BUMP_DRY_RUN:-false}" = true ]; then
-    echo "dry run: pins would change, no commit or pull request made"
+    set_output changed false
+    echo "dry run: no commit or pull request made"
     return 0
   fi
+  set_output changed true
 
   if git config --get-regexp '^http\..*\.extraheader' > /dev/null; then
     echo "::warning::the checkout persisted a credential; the push uses it instead of the token input. Set persist-credentials: false on actions/checkout."

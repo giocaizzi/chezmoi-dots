@@ -21,7 +21,7 @@ Only the last step receives the token.
 | `version` | required | chezmoi-dots release to install, `0.4.1` or `v0.4.1`. Explicit on purpose: the run is reproducible and never trusts an unpinned download |
 | `source-dir` | `.` | Chezmoi source directory, relative to the workspace |
 | `names` | empty | Whitespace-separated pins to bump; empty bumps all. Each is limited to letters, digits, `.`, `_`, `/` and `-` |
-| `dry-run` | `false` | `true` runs `pkg bump --dry-run`; nothing is committed and no pull request is made, but `changed` still reports whether a pin would move |
+| `dry-run` | `false` | `true` runs `pkg bump --dry-run`; it writes nothing, `changed` is `false` and no pull request is made; the step log lists what would move |
 | `token` | `${{ github.token }}` | Pushes the branch and opens the pull request |
 | `branch` | `chore/bump-releases` | Branch the changes are pushed to (force-pushed on every run) |
 | `base` | empty | Base branch; empty is the repository's default branch |

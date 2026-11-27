@@ -105,7 +105,7 @@ check "pr: no changes makes no gh call" test ! -s "$root/gh.log"
 echo "version = 2" > "$repo/pins.toml"
 : > "$root/gh_out"
 env "${pr_env[@]}" PKG_BUMP_DRY_RUN=true "$script" pr > "$root/out" 2>&1
-check "pr: dry-run reports changed" grep -qx 'changed=true' "$root/gh_out"
+check "pr: dry-run reports no change" grep -qx 'changed=false' "$root/gh_out"
 check "pr: dry-run makes no commit" test "$(git -C "$repo" rev-list --count HEAD)" = 1
 check "pr: dry-run makes no gh call" test ! -s "$root/gh.log"
 
