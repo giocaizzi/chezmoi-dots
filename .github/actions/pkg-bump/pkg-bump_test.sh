@@ -13,12 +13,6 @@ pass() { echo "ok   $1"; }
 fail() { echo "FAIL $1"; fails=$((fails + 1)); }
 # check <name> <command...>: passes when the command succeeds.
 check() { local n=$1; shift; if "$@"; then pass "$n"; else fail "$n"; fi; }
-# xfail <name> <command...>: a known bug, strict. Expected to fail; a pass fails the suite so the
-# fix removes the marker and turns the line into a check.
-xfail() {
-  local n=$1; shift
-  if "$@"; then echo "XPASS $n: fixed, turn this xfail into a check"; fails=$((fails + 1)); else echo "xfail $n"; fi
-}
 # rejects <name> <env...> -- <subcommand>: passes when the script exits non-zero.
 rejects() {
   local n=$1; shift
@@ -29,7 +23,8 @@ rejects() {
 }
 
 # Fake gh: logs argv, answers the calls pr makes. FAKE_GH_PRS, a JSON list of open PRs as the API
-# returns them for the head branch name, is filtered with the caller's -q expression.
+# returns them for the head branch name (any repository), is filtered with the caller's -q expression.
+# FAKE_GH_DEFAULT is the default branch.
 mkdir -p "$root/bin"
 cat > "$root/bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -37,8 +32,8 @@ echo "gh $*" >> "$FAKE_GH_LOG"
 q=; prev=
 for a in "$@"; do [ "$prev" = -q ] && q=$a; prev=$a; done
 case "$1 $2" in
-  "repo view") echo main ;;
-  "pr list") if [ -n "${FAKE_GH_PRS:-}" ]; then jq -r "$q // empty" <<< "$FAKE_GH_PRS"; else echo "${FAKE_GH_EXISTING:-}"; fi ;;
+  "repo view") echo "${FAKE_GH_DEFAULT:-main}" ;;
+  "pr list") [ -z "${FAKE_GH_PRS:-}" ] || jq -r "$q" <<< "$FAKE_GH_PRS" ;;
   "pr create") echo "https://example.test/example/harness/pull/7" ;;
 esac
 exit 0
@@ -56,6 +51,10 @@ rejects "version: two parts rejected" PKG_BUMP_VERSION=1.2 -- install
 rejects "install: unsupported runner" PKG_BUMP_VERSION=0.4.1 RUNNER_OS=Windows RUNNER_ARCH=X64 -- install
 rejects "name: bad name rejected" PKG_BUMP_SOURCE=. "PKG_BUMP_NAMES=ok \$(id)" GITHUB_WORKSPACE="$root" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" -- bump
 rejects "name: leading dash rejected" PKG_BUMP_SOURCE=. PKG_BUMP_NAMES='--evil' GITHUB_WORKSPACE="$root" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" -- bump
+rejects "event: pull_request refused" GITHUB_EVENT_NAME=pull_request PKG_BUMP_VERSION=0.4.1 RUNNER_OS=Linux RUNNER_ARCH=X64 -- install
+check "event: pull_request message" grep -q 'does not run on pull_request events' "$root/out"
+rejects "event: pull_request_target refused" GITHUB_EVENT_NAME=pull_request_target -- bump
+rejects "branch: refs/ prefix rejected" PKG_BUMP_VERSION=0.4.1 PKG_BUMP_BRANCH=refs/heads/x PKG_BUMP_TITLE=t GITHUB_WORKSPACE="$root" GITHUB_OUTPUT="$root/o" -- pr
 rejects "source: parent dir rejected" PKG_BUMP_SOURCE=../x GITHUB_WORKSPACE="$root" -- bump
 for b in '-x' 'a..b' 'a b' 'a;b' '/a' 'a/' 'x.lock'; do
   rejects "branch: '$b' rejected" PKG_BUMP_VERSION=0.4.1 "PKG_BUMP_BRANCH=$b" PKG_BUMP_TITLE=t GITHUB_WORKSPACE="$root" GITHUB_OUTPUT="$root/o" -- pr
@@ -93,9 +92,10 @@ check "bump: args, dry-run and source dir" grep -qF "chezmoi-dots pkg bump --dry
 # A YAML block (names: |) separates pins by newlines; read -a stops at the first one.
 : > "$root/dots.log"
 env PKG_BUMP_SOURCE=home "PKG_BUMP_NAMES=alpha"$'\n'"beta" GITHUB_WORKSPACE="$ws" PATH="$root/bin:$PATH" FAKE_DOTS_LOG="$root/dots.log" "$script" bump > "$root/out" 2>&1
-xfail "bump: newline-separated names all reach pkg bump" grep -qF "chezmoi-dots pkg bump alpha beta source=" "$root/dots.log"
+check "bump: newline-separated names all reach pkg bump" grep -qF "chezmoi-dots pkg bump alpha beta source=" "$root/dots.log"
 
 # --- pr ---
+
 origin="$root/origin.git"
 repo="$root/ws2"
 git init -q --template= --bare "$origin"
@@ -114,7 +114,13 @@ pr_env=(PKG_BUMP_VERSION=0.4.1 PKG_BUMP_SOURCE=. PKG_BUMP_BRANCH=chore/bump-rele
 env "${pr_env[@]}" "$script" pr > "$root/out" 2>&1
 check "pr: no changes sets changed=false" grep -qx 'changed=false' "$root/gh_out"
 check "pr: no changes says up to date" grep -q 'all pins are up to date' "$root/out"
-check "pr: no changes makes no gh call" test ! -s "$root/gh.log"
+check "pr: no changes never creates or edits a PR" test -z "$(grep -E 'gh pr (create|edit)' "$root/gh.log" || true)"
+check "pr: no changes without a PR prints no notice" test -z "$(grep '^::notice::' "$root/out" || true)"
+: > "$root/gh.log"
+env "${pr_env[@]}" "FAKE_GH_PRS=[{\"url\":\"https://example.test/example/harness/pull/5\",\"isCrossRepository\":false}]" "$script" pr > "$root/out" 2>&1
+check "pr: no changes notices an open PR" grep -q '^::notice::.*pull/5.*stale' "$root/out"
+check "pr: no changes does not edit the open PR" test -z "$(grep -E 'gh pr (create|edit)' "$root/gh.log" || true)"
+: > "$root/gh.log"
 
 echo "version = 2" > "$repo/pins.toml"
 : > "$root/gh_out"
@@ -130,6 +136,8 @@ check "pr: branch pushed to origin" git -C "$origin" rev-parse --verify --quiet 
 check "pr: commit message is the title" test "$(git -C "$origin" log -1 --format=%s chore/bump-releases)" = "chore(deps): bump pinned releases"
 check "pr: commit author is the bot" test "$(git -C "$origin" log -1 --format=%ae chore/bump-releases)" = "41898282+github-actions[bot]@users.noreply.github.com"
 check "pr: base resolved from the default branch" grep -q 'gh repo view example/harness' "$root/gh.log"
+check "pr: lookup asks for isCrossRepository and filters on it" grep -qF "isCrossRepository -q map(select(.isCrossRepository | not))" "$root/gh.log"
+check "pr: lookup keeps --base" grep -q 'gh pr list --head chore/bump-releases --base main' "$root/gh.log"
 check "pr: gh pr create with title" grep -qF 'gh pr create --base main --head chore/bump-releases --title chore(deps): bump pinned releases' "$root/gh.log"
 check "pr: url written to output" grep -qx 'pull-request-url=https://example.test/example/harness/pull/7' "$root/gh_out"
 check "pr: body names chezmoi-dots version" grep -q 'chezmoi-dots 0.4.1' "$root/gh.log"
@@ -138,10 +146,10 @@ check "pr: no config persisted a credential helper" test -z "$(git -C "$repo" co
 # Existing PR: edit, not create.
 echo "version = 3" > "$repo/pins.toml"
 : > "$root/gh.log"; : > "$root/gh_out"
-env "${pr_env[@]}" PKG_BUMP_BASE=main FAKE_GH_EXISTING=https://example.test/example/harness/pull/7 "$script" pr > "$root/out" 2>&1
+env "${pr_env[@]}" PKG_BUMP_BASE=main "FAKE_GH_PRS=[{\"url\":\"https://example.test/example/harness/pull/7\",\"isCrossRepository\":false}]" "$script" pr > "$root/out" 2>&1
 check "pr: existing PR is edited" grep -q 'gh pr edit https://example.test/example/harness/pull/7 --title' "$root/gh.log"
 check "pr: existing PR is not created again" test -z "$(grep 'gh pr create' "$root/gh.log" || true)"
-check "pr: explicit base skips repo view" test -z "$(grep 'gh repo view' "$root/gh.log" || true)"
+check "pr: explicit base still resolves the default branch" test "$(grep -c 'gh repo view' "$root/gh.log")" = 1
 
 # The token never shows in argv logs or output.
 check "token: absent from gh argv log" test -z "$(grep -F "$token" "$root/gh.log" || true)"
@@ -161,8 +169,8 @@ echo "version = 5" > "$repo/pins.toml"
 : > "$root/gh.log"; : > "$root/gh_out"
 fork_pr='[{"url":"https://example.test/example/harness/pull/9","isCrossRepository":true,"headRepositoryOwner":{"login":"fork-owner"}}]'
 env "${pr_env[@]}" PKG_BUMP_BASE=main "FAKE_GH_PRS=$fork_pr" "$script" pr > "$root/out" 2>&1
-xfail "pr: a fork PR on the same branch name is not edited" test -z "$(grep 'gh pr edit https://example.test/example/harness/pull/9' "$root/gh.log" || true)"
-xfail "pr: a fork PR on the same branch name does not stop the PR" grep -q 'gh pr create' "$root/gh.log"
+check "pr: a fork PR on the same branch name is not edited" test -z "$(grep 'gh pr edit https://example.test/example/harness/pull/9' "$root/gh.log" || true)"
+check "pr: a fork PR on the same branch name does not stop the PR" grep -q 'gh pr create' "$root/gh.log"
 
 # branch equal to the base (or default) branch: a commit merged on origin after the checkout must
 # survive; the force push drops it. The action must refuse before pushing.
@@ -175,7 +183,28 @@ merged=$(git -C "$other" rev-parse HEAD)
 echo "version = 6" > "$repo/pins.toml"
 : > "$root/gh.log"
 env "${pr_env[@]}" PKG_BUMP_BRANCH=main "$script" pr > "$root/out" 2>&1
-xfail "pr: branch equal to the default branch never force-pushes it" git -C "$origin" merge-base --is-ancestor "$merged" refs/heads/main
+check "pr: branch equal to the default branch never force-pushes it" git -C "$origin" merge-base --is-ancestor "$merged" refs/heads/main
+rejects "pr: branch equal to the default branch exits non-zero" "${pr_env[@]}" PKG_BUMP_BRANCH=main -- pr
+check "pr: branch equal to the default branch says why" grep -q "is the base or the default branch" "$root/out"
+check "pr: branch equal to the default branch makes no PR" test -z "$(grep -E 'gh pr (create|edit)' "$root/gh.log" || true)"
+rejects "pr: branch equal to an explicit base rejected" "${pr_env[@]}" PKG_BUMP_BRANCH=release PKG_BUMP_BASE=release -- pr
+rejects "pr: branch equal to the default branch rejected with another base" "${pr_env[@]}" PKG_BUMP_BRANCH=main PKG_BUMP_BASE=release -- pr
+
+# A tracked file changed outside source-dir is neither committed nor a change.
+git -C "$repo" checkout -q -- pins.toml
+mkdir -p "$repo/home"
+echo a > "$repo/home/p.toml"; echo a > "$repo/outside.txt"
+git -C "$repo" add home outside.txt
+git -C "$repo" commit -q -m "add scoped files"
+echo b > "$repo/outside.txt"
+: > "$root/gh.log"; : > "$root/gh_out"
+env "${pr_env[@]}" PKG_BUMP_SOURCE=home "$script" pr > "$root/out" 2>&1
+check "pr: a change outside source-dir is not a change" grep -qx 'changed=false' "$root/gh_out"
+echo b > "$repo/home/p.toml"
+: > "$root/gh_out"
+env "${pr_env[@]}" PKG_BUMP_SOURCE=home "$script" pr > "$root/out" 2>&1
+check "pr: source-dir change sets changed=true" grep -qx 'changed=true' "$root/gh_out"
+check "pr: only source-dir files are committed" test "$(git -C "$origin" show --name-only --format= chore/bump-releases)" = "home/p.toml"
 
 echo
 if [ "$fails" -ne 0 ]; then echo "$fails failure(s)"; exit 1; fi

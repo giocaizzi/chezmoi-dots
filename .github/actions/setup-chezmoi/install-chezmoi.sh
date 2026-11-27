@@ -17,7 +17,7 @@ esac
 name="chezmoi_${CHEZMOI_VERSION}_${asset}"
 dest="$RUNNER_TEMP/chezmoi"
 mkdir -p "$dest"
-curl -fsSL --retry 3 -o "$dest/$name" "https://github.com/twpayne/chezmoi/releases/download/v${CHEZMOI_VERSION}/${name}"
+curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "$dest/$name" "https://github.com/twpayne/chezmoi/releases/download/v${CHEZMOI_VERSION}/${name}"
 got=$(openssl dgst -sha256 "$dest/$name" | awk '{print $NF}')
 if [ "$got" != "$want" ]; then
   echo "checksum mismatch for $name: got $got, want $want" >&2

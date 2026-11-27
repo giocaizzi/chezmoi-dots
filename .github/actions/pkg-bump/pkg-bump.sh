@@ -21,7 +21,7 @@ normalize_version() {
 
 check_branch() {
   local b=${PKG_BUMP_BRANCH:-}
-  [[ $b =~ ^[A-Za-z0-9._/-]+$ && $b != -* && $b != /* && $b != */ && $b != *..* && $b != *//* && $b != *.lock ]] \
+  [[ $b =~ ^[A-Za-z0-9._/-]+$ && $b != -* && $b != /* && $b != */ && $b != *..* && $b != *//* && $b != *.lock && $b != refs/* ]] \
     || die "invalid branch '$b'"
 }
 
@@ -32,7 +32,7 @@ source_path() {
 }
 
 cmd_install() {
-  local v os arch asset base dir want got
+  local v os arch asset base dir want got proto
   v=$(normalize_version)
   case "${RUNNER_OS:-}/${RUNNER_ARCH:-}" in
     Linux/X64) os=linux; arch=amd64 ;;
@@ -42,8 +42,11 @@ cmd_install() {
   asset="chezmoi-dots_${v}_${os}_${arch}"
   base=${PKG_BUMP_DOWNLOAD_BASE:-https://github.com/giocaizzi/chezmoi-dots/releases/download}
   dir=$(mktemp -d "${RUNNER_TEMP:?}/chezmoi-dots.XXXXXX")
-  curl -fsSL --retry 3 -o "$dir/$asset" "$base/v$v/$asset"
-  curl -fsSL --retry 3 -o "$dir/checksums.txt" "$base/v$v/checksums.txt"
+  # https only, redirects included; the test override may use file://.
+  proto='=https'
+  [ -z "${PKG_BUMP_DOWNLOAD_BASE:-}" ] || proto='=https,file'
+  curl -fsSL --proto "$proto" --proto-redir "$proto" --retry 3 -o "$dir/$asset" "$base/v$v/$asset"
+  curl -fsSL --proto "$proto" --proto-redir "$proto" --retry 3 -o "$dir/checksums.txt" "$base/v$v/checksums.txt"
   want=$(awk -v n="$asset" '$2 == n {print $1; exit}' "$dir/checksums.txt")
   [ -n "$want" ] || die "no checksum for $asset in checksums.txt"
   got=$(openssl dgst -sha256 "$dir/$asset" | awk '{print $NF}')
@@ -60,8 +63,9 @@ cmd_bump() {
   src=$(source_path)
   [ -d "$src" ] || die "source-dir '$src' is not a directory"
   [ "${PKG_BUMP_DRY_RUN:-false}" = true ] && args+=(--dry-run)
-  read -r -a names <<< "${PKG_BUMP_NAMES:-}"
-  for name in "${names[@]}"; do
+  # Split on any whitespace, newlines included (a YAML block); read -d '' returns 1 at EOF.
+  read -r -d '' -a names <<< "${PKG_BUMP_NAMES:-}" || true
+  for name in ${names[@]+"${names[@]}"}; do
     [[ $name =~ ^[A-Za-z0-9._/-]+$ && $name != -* ]] || die "invalid pin name '$name'"
     args+=("$name")
   done
@@ -70,19 +74,45 @@ cmd_bump() {
 
 set_output() { echo "$1=$2" >> "${GITHUB_OUTPUT:?}"; }
 
+# resolve_base sets base (default: the repository default branch) and refuses a branch that is
+# the base or the default branch, which the force push would overwrite.
+resolve_base() {
+  default_branch=$(gh repo view "${GITHUB_REPOSITORY:?}" --json defaultBranchRef -q .defaultBranchRef.name)
+  base=${PKG_BUMP_BASE:-$default_branch}
+  [ "$branch" != "$base" ] && [ "$branch" != "$default_branch" ] \
+    || die "branch '$branch' is the base or the default branch; it is force-pushed, use a dedicated branch"
+}
+
+# find_pr prints the URL of an open pull request from this repository on the branch, if any.
+# gh matches --head by branch name alone, so fork PRs of the same name are filtered out.
+find_pr() {
+  gh pr list --head "$branch" --base "$base" --state open --json url,isCrossRepository \
+    -q 'map(select(.isCrossRepository | not))[0].url // empty'
+}
+
 cmd_pr() {
-  local src v branch base title url body
+  local src v branch base default_branch title url body rel
   v=$(normalize_version)
   check_branch
   branch=$PKG_BUMP_BRANCH
   title=${PKG_BUMP_TITLE:?}
   src=$(source_path)
   cd "$src"
+  rel=$(git rev-parse --show-prefix)
+  rel=${rel:-.}
   cd "$(git rev-parse --show-toplevel)"
 
-  if [ -z "$(git status --porcelain --untracked-files=no)" ]; then
+  # Only the source directory counts: a tracked file changed elsewhere is not a pin bump.
+  if [ -z "$(git status --porcelain --untracked-files=no -- "$rel")" ]; then
     set_output changed false
     echo "all pins are up to date"
+    # pkg bump --dry-run writes nothing; a dry run makes no gh call.
+    [ "${PKG_BUMP_DRY_RUN:-false}" = true ] && return 0
+    resolve_base
+    url=$(find_pr)
+    if [ -n "$url" ]; then
+      echo "::notice::pull request $url was left open and may be stale; close it if the pins were bumped elsewhere"
+    fi
     return 0
   fi
   # pkg bump --dry-run writes nothing, so a change here was not made by it.
@@ -91,24 +121,22 @@ cmd_pr() {
     echo "dry run: no commit or pull request made"
     return 0
   fi
+  resolve_base
   set_output changed true
 
   if git config --get-regexp '^http\..*\.extraheader' > /dev/null; then
     echo "::warning::the checkout persisted a credential; the push uses it instead of the token input. Set persist-credentials: false on actions/checkout."
   fi
-  base=${PKG_BUMP_BASE:-}
-  if [ -z "$base" ]; then
-    base=$(gh repo view "${GITHUB_REPOSITORY:?}" --json defaultBranchRef -q .defaultBranchRef.name)
-  fi
 
   git switch -C "$branch"
-  git add -u
+  git add -u -- "$rel"
   git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -q -m "$title"
   git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push --force origin "HEAD:refs/heads/$branch"
 
-  # shellcheck disable=SC2016 # the backticks are Markdown, not command substitution
-  body=$(printf 'Versions, archive commits and checksums below come from `chezmoi-dots pkg bump` (chezmoi-dots %s).\n\n```\n%s\n```\n' "$v" "$(git diff --stat HEAD~1)")
-  url=$(gh pr list --head "$branch" --base "$base" --state open --json url -q '.[0].url')
+  tick='`'
+  body=$(printf 'Versions, archive commits and checksums below come from %schezmoi-dots pkg bump%s (chezmoi-dots %s).\n\n%s%s%s\n%s\n%s%s%s\n' \
+    "$tick" "$tick" "$v" "$tick" "$tick" "$tick" "$(git diff --stat HEAD~1)" "$tick" "$tick" "$tick")
+  url=$(find_pr)
   if [ -n "$url" ]; then
     gh pr edit "$url" --title "$title" --body "$body"
   else
@@ -117,6 +145,10 @@ cmd_pr() {
   set_output pull-request-url "$url"
   echo "pull request: $url"
 }
+
+case "${GITHUB_EVENT_NAME:-}" in
+  pull_request*) die "pkg-bump does not run on pull_request events: the checkout is pull request code" ;;
+esac
 
 case "${1:-}" in
   install) cmd_install ;;
